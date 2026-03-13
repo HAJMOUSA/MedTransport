@@ -49,8 +49,9 @@ services:
       NODE_ENV: ${NODE_ENV:-production}
       DATABASE_URL: postgresql://${POSTGRES_USER:-midtransport}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-midtransport}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
-    ports:
-      - "3001:3001"
+    # API is NOT exposed publicly — nginx proxies /api/ internally
+    expose:
+      - "3001"
     depends_on:
       db:
         condition: service_healthy
@@ -59,17 +60,18 @@ services:
     volumes:
       - uploads_data:/app/uploads
 
-  # ─── Web (React + Vite) ─────────────────────────────────────────────────────
+  # ─── Web (React + Vite + Nginx reverse proxy) ────────────────────────────────
   web:
     build:
       context: ./apps/web
       dockerfile: Dockerfile
       args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
+        # Empty = use same origin (nginx proxies /api/ internally — no CORS ever)
+        VITE_API_URL: ""
     container_name: midtransport_web
     restart: unless-stopped
     ports:
-      - "3000:80"
+      - "80:80"
     depends_on:
       - api
 
