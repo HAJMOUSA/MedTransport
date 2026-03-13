@@ -1,8 +1,14 @@
 import axios from 'axios';
 import { useAuthStore } from '../hooks/useAuth';
 
+// VITE_API_URL="" (empty) = same-origin via nginx proxy (production)
+// VITE_API_URL="http://..." = explicit URL (local dev or direct access)
+const API_BASE = import.meta.env.VITE_API_URL !== undefined && import.meta.env.VITE_API_URL !== ''
+  ? import.meta.env.VITE_API_URL
+  : (import.meta.env.DEV ? 'http://localhost:3001' : '');
+
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001',
+  baseURL: API_BASE,
   withCredentials: false,
 });
 
@@ -22,7 +28,7 @@ api.interceptors.response.use(
       original._retry = true;
       try {
         const refreshToken = useAuthStore.getState().refreshToken;
-        const { data } = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/auth/refresh`, { refreshToken });
+        const { data } = await axios.post(`${API_BASE}/api/auth/refresh`, { refreshToken });
         useAuthStore.getState().setTokens(data.accessToken, data.refreshToken);
         original.headers.Authorization = `Bearer ${data.accessToken}`;
         return api(original);
