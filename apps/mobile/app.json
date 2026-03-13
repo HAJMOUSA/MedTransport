@@ -1,0 +1,56 @@
+{
+  "expo": {
+    "name": "MidTransport Driver",
+    "slug": "midtransport-driver",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#2563EB"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.midtransport.driver",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "MidTransport uses your location to track active trips and detect arrivals.",
+        "NSLocationAlwaysUsageDescription": "MidTransport uses background location to continue tracking during active trips.",
+        "NSCameraUsageDescription": "Camera is used as a fallback when a rider cannot receive an OTP."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#2563EB"
+      },
+      "package": "com.midtransport.driver",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "VIBRATE",
+        "RECEIVE_BOOT_COMPLETED"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "MidTransport needs location access to track your trips."
+        }
+      ],
+      "expo-router",
+      "expo-secure-store"
+    ]
+  }
+}

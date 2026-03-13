@@ -1,0 +1,11 @@
+name,phone,address,mobility_type,insurance_name,insurance_id,emergency_contact,notes
+Dorothy Williams,(313) 555-0101,"1001 Woodward Ave, Detroit, MI 48226",standard,Medicaid,MI-MCD-4482610,Charles Williams (313) 555-0199,Prefers pickup at main entrance
+Robert Johnson,(313) 555-0102,"4201 St Antoine St, Detroit, MI 48201",wheelchair,Medicare,MCR-2938475,Linda Johnson (313) 555-0198,Needs 15 min advance notice; side ramp entrance
+Maria Garcia,(313) 555-0103,"2799 W Grand Blvd, Detroit, MI 48202",standard,Medicaid,MI-MCD-3391720,Carlos Garcia (313) 555-0197,Speaks Spanish; bring interpreter card
+James Thompson,(313) 555-0104,"261 Mack Ave, Detroit, MI 48201",bariatric,Blue Cross Blue Shield,BCBS-77429301,Susan Thompson (313) 555-0196,Bariatric lift required; call 10 min before arrival
+Patricia Brown,(313) 555-0105,"6071 W Outer Dr, Detroit, MI 48235",wheelchair,Medicare,MCR-5561084,Michael Brown (313) 555-0195,Electric wheelchair; needs extra door width
+Thomas Davis,(313) 555-0106,"19 E Forest Ave, Detroit, MI 48201",standard,Medicaid,MI-MCD-8829341,Angela Davis (313) 555-0194,Visually impaired; escort from door to vehicle
+Barbara Wilson,(313) 555-0107,"1 Comerica Park, Detroit, MI 48226",standard,United Healthcare,UHC-66103847,David Wilson (313) 555-0193,No stairs; uses cane
+Charles Martinez,(313) 555-0108,"2727 Second Ave, Detroit, MI 48201",stretcher,Medicaid,MI-MCD-2047563,Rosa Martinez (313) 555-0192,Stretcher transport only; dialysis patient (Mon/Wed/Fri)
+Linda Anderson,(313) 555-0109,"5057 Woodward Ave, Detroit, MI 48202",standard,Medicare,MCR-4418920,James Anderson (313) 555-0191,Hearing impaired; text preferred over call
+William Taylor,(313) 555-0110,"4100 John R St, Detroit, MI 48201",wheelchair,Medicaid,MI-MCD-9934102,Mary Taylor (313) 555-0190,Manual wheelchair; folds for transport
