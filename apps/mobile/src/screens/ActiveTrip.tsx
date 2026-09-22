@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSocket } from '../hooks/useSocket';
+import { useDriverProfile } from '../hooks/useDriverProfile';
 import { api } from '../lib/api';
 
 interface TripDetail {
@@ -44,6 +45,7 @@ export function ActiveTrip({ route, navigation }: { route: any; navigation: any 
   const { tripId } = route.params;
   const queryClient = useQueryClient();
   const socketRef = useSocket();
+  const { driverId } = useDriverProfile();
   const locationSub = useRef<Location.LocationSubscription | null>(null);
   const [speed, setSpeed] = useState<number | null>(null);
   const [locationAllowed, setLocationAllowed] = useState(false);
@@ -77,12 +79,13 @@ export function ActiveTrip({ route, navigation }: { route: any; navigation: any 
         },
         (loc) => {
           const socket = socketRef.current;
-          if (!socket?.connected) return;
+          if (!socket?.connected || !driverId) return;
           setSpeed(loc.coords.speed ? Math.round(loc.coords.speed * 2.237) : 0); // m/s → mph
           socket.emit('driver:location-update', {
+            driverId,
             tripId,
-            latitude: loc.coords.latitude,
-            longitude: loc.coords.longitude,
+            lat: loc.coords.latitude,
+            lng: loc.coords.longitude,
             speedMph: loc.coords.speed ? loc.coords.speed * 2.237 : 0,
             headingDeg: loc.coords.heading ?? 0,
             accuracyM: Math.round(loc.coords.accuracy ?? 0),
@@ -94,7 +97,7 @@ export function ActiveTrip({ route, navigation }: { route: any; navigation: any 
     return () => {
       locationSub.current?.remove();
     };
-  }, [tripId, socketRef]);
+  }, [tripId, socketRef, driverId]);
 
   // Listen for OTP-sent event
   useEffect(() => {

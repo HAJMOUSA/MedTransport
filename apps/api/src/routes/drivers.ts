@@ -8,6 +8,22 @@ import { AppError } from '../middleware/errorHandler';
 const router = Router();
 router.use(authenticate);
 
+// ─── GET /api/drivers/me (current driver's own profile) ─────────────────────
+// must precede /:id routes
+router.get('/me', requireRole('driver'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const driver = await queryOne(
+        `SELECT d.id, d.on_shift, d.shift_started_at, d.vehicle_id
+         FROM drivers d WHERE d.user_id = $1 AND d.org_id = $2`,
+        [req.user!.userId, req.user!.orgId]
+      );
+      if (!driver) return next(new AppError('Driver profile not found', 404));
+      res.json(driver);
+    } catch (err) { next(err); }
+  }
+);
+
 // ─── GET /api/drivers ────────────────────────────────────────────────────────
 router.get('/', requireRole('admin', 'dispatcher'),
   async (req: Request, res: Response, next: NextFunction) => {

@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../hooks/useAuth';
 import { useSocket } from '../hooks/useSocket';
+import { useDriverProfile } from '../hooks/useDriverProfile';
 import { api } from '../lib/api';
 
 interface Trip {
@@ -61,7 +62,7 @@ export function TripList({ navigation }: { navigation: any }) {
   const queryClient = useQueryClient();
   const { user, logout } = useAuthStore();
   const socketRef = useSocket();
-  const [onShift, setOnShift] = useState(false);
+  const { driverId, onShift } = useDriverProfile();
   const [shiftLoading, setShiftLoading] = useState(false);
 
   const { data: trips = [], isLoading, refetch, isRefetching } = useQuery<Trip[]>({
@@ -84,17 +85,15 @@ export function TripList({ navigation }: { navigation: any }) {
 
   const toggleShift = useCallback(async () => {
     const socket = socketRef.current;
-    if (!socket) return;
+    if (!socket || !driverId) return;
     setShiftLoading(true);
-    if (!onShift) {
-      socket.emit('driver:start-shift');
-      setOnShift(true);
-    } else {
-      socket.emit('driver:end-shift');
-      setOnShift(false);
-    }
-    setShiftLoading(false);
-  }, [onShift, socketRef]);
+    socket.emit(onShift ? 'driver:end-shift' : 'driver:start-shift', { driverId });
+    // server updates DB; refetch profile to reflect truth
+    setTimeout(() => {
+      queryClient.invalidateQueries({ queryKey: ['driver-me'] });
+      setShiftLoading(false);
+    }, 500);
+  }, [onShift, driverId, socketRef, queryClient]);
 
   const activeTripStatuses = ['dispatched', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'en_route_dropoff', 'arrived_dropoff'];
   const activeTrips = trips.filter(t => activeTripStatuses.includes(t.status));
