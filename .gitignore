@@ -36,3 +36,10 @@ Thumbs.db
 
 # TypeScript cache
 *.tsbuildinfo
+
+# PII — vendor CSV exports contain rider data; never commit
+Documentation/
+docs/*.csv
+
+# Superpowers SDD scratch workspace
+.superpowers/
