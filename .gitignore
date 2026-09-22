@@ -43,3 +43,7 @@ docs/*.csv
 
 # Superpowers SDD scratch workspace
 .superpowers/
+
+# Local pnpm shim (machine npm is broken; local-only tooling)
+pnpm-workspace.yaml
+pnpm-lock.yaml
