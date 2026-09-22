@@ -21,6 +21,7 @@ import importRoutes from './routes/import';
 import trackingRoutes from './routes/tracking';
 import otpRoutes from './routes/otp';
 import reportRoutes from './routes/reports';
+import geocodeRoutes from './routes/geocode';
 
 // Socket handler
 import { registerLocationHandlers } from './sockets/locationHandler';
@@ -79,6 +80,7 @@ app.use('/api/import', importRoutes);
 app.use('/api/tracking', trackingRoutes);
 app.use('/api/otp', otpRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/geocode', geocodeRoutes);
 
 // Health check
 app.get('/api/health', async (_req, res) => {
