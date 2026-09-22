@@ -22,7 +22,7 @@ export function TripDetailModal({ trip, onClose }: TripDetailModalProps) {
       ? new Date(trip.scheduled_pickup_at).toISOString().slice(0, 16)
       : '',
     mobilityType: trip.mobility_type,
-    dispatcherNotes: '',
+    dispatcherNotes: trip.dispatcher_notes ?? '',
   });
 
   const [assignDriverId, setAssignDriverId] = useState<string>(

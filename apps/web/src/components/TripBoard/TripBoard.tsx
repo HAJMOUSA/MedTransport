@@ -30,6 +30,7 @@ export interface Trip {
   scheduled_pickup_at: string;
   actual_pickup_at: string | null;
   mobility_type: string;
+  dispatcher_notes: string | null;
   vehicle_name: string | null;
 }
 
