@@ -8,6 +8,7 @@ import { query, queryOne } from '../db/pool';
 import { decodeCsv } from '../services/importEngine/encoding';
 import { parseCsv, CsvStructureError } from '../services/importEngine/csvParse';
 import { detectProfile, ProfileCandidate } from '../services/importEngine/profiles';
+import { runAnalysis } from '../services/importRunner';
 
 const router = Router();
 router.use(authenticate, requireRole('admin', 'dispatcher'));
@@ -72,5 +73,20 @@ router.post('/upload', upload.single('file'), async (req: Request, res: Response
     });
   } catch (err) { next(err); }
 });
+
+// ─── POST /api/import/trips/analyze ──────────────────────────────────────────
+router.post('/analyze',
+  body('uploadId').isInt(), body('profileVersionId').isInt(),
+  body('mappingOverrides').optional().isObject(),
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!validationResult(req).isEmpty()) return next(new AppError('uploadId and profileVersionId are required', 400));
+    try {
+      const { uploadId, profileVersionId, mappingOverrides } = req.body;
+      const result = await runAnalysis(req.user!.orgId, uploadId, profileVersionId, mappingOverrides);
+      const { validated, config, ...publicResult } = result; // don't leak full trips in preview
+      res.json(publicResult);
+    } catch (err) { next(err); }
+  }
+);
 
 export default router;
