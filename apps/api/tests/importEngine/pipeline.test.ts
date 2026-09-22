@@ -47,6 +47,7 @@ describe('vendor B pipeline', () => {
     expect(validated.counts.total).toBe(2);
     expect(validated.results[0].trip.pickupAt).toBe('2026-09-21T12:15:00.000Z');
     expect(validated.results[0].trip.levelOfService).toBe('WCH');
+    expect(validated.results.every(r => r.status !== 'invalid')).toBe(true);
   });
 });
 
