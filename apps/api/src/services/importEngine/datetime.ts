@@ -12,6 +12,12 @@ export function parseDate(value: string, format: string, tz: string): string | n
   return dt.isValid ? dt.toISODate() : null;
 }
 
+export function isValidTime(value: string, format: string, tz: string): boolean {
+  const v = value.trim();
+  if (!v) return false;
+  return DateTime.fromFormat(v, format, { zone: tz }).isValid;
+}
+
 export function parseDateTime(
   parts: { dateTime?: string; date?: string; time?: string },
   config: Cfg

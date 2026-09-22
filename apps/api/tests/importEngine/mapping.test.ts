@@ -68,6 +68,26 @@ describe('applyMapping', () => {
     expect(issues.some(i => i.code === 'E_DATE_PARSE' && i.row === 2 && i.sourceTripId === 'T-100')).toBe(true);
   });
 
+  it('attributes garbage date in date-only mapping to E_DATE_PARSE', () => {
+    const dateOnlyProfile = {
+      ...PROFILE,
+      columnMap: { 'Trip Number': 'external_trip_id', 'Appointment Date': 'appointment_at.date' },
+    };
+    const bad = { ...ROW, 'Appointment Date': 'garbage' };
+    const { trips, issues } = applyMapping({ ...parsed, rows: [bad] }, dateOnlyProfile, 'America/New_York');
+    expect(trips[0].appointmentAt).toBeNull();
+    expect(issues.some(i => i.code === 'E_DATE_PARSE' && i.row === 2 && i.sourceTripId === 'T-100')).toBe(true);
+    expect(issues.some(i => i.code === 'E_TIME_PARSE')).toBe(false);
+  });
+
+  it('attributes garbage time with valid date to E_TIME_PARSE', () => {
+    const bad = { ...ROW, 'Time': 'garbage' };
+    const { trips, issues } = applyMapping({ ...parsed, rows: [bad] }, PROFILE, 'America/New_York');
+    expect(trips[0].appointmentAt).toBeNull();
+    expect(issues.some(i => i.code === 'E_TIME_PARSE' && i.row === 2 && i.sourceTripId === 'T-100')).toBe(true);
+    expect(issues.some(i => i.code === 'E_DATE_PARSE')).toBe(false);
+  });
+
   it('keeps untranslated controlled values raw for validation to flag', () => {
     const odd = { ...ROW, 'Level of Service': 'Helicopter' };
     const { trips } = applyMapping({ ...parsed, rows: [odd] }, PROFILE, 'America/New_York');

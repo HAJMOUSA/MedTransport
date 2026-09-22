@@ -1,7 +1,7 @@
 import type { CanonicalTrip, ImportIssue, StructuredAddress, VendorProfileConfig } from '@midtransport/shared';
 import { CANONICAL_FIELDS } from './canonical';
 import type { ParsedCsv } from './csvParse';
-import { parseDate, parseDateTime } from './datetime';
+import { isValidTime, parseDate, parseDateTime } from './datetime';
 import { makeIssue } from './errors';
 import { normalizeName, normalizeNumeric, normalizePhone, normalizeText, normalizeZip } from './normalize';
 
@@ -129,7 +129,10 @@ export function applyMapping(parsed: ParsedCsv, config: VendorProfileConfig, org
       const prop = CAMEL[key] as keyof CanonicalTrip;
       const iso = parseDateTime(parts, { ...config, timezone: tz });
       if (iso === null) {
-        const badCode = parts.date && !parts.time ? 'E_TIME_PARSE' : 'E_DATE_PARSE';
+        const badCode =
+          !parts.dateTime && parts.time?.trim() && !isValidTime(parts.time, config.timeFormat, tz)
+            ? 'E_TIME_PARSE'
+            : 'E_DATE_PARSE';
         issues.push(makeIssue(rowNum, trip.externalTripId, key, badCode));
       }
       (trip as unknown as Record<string, unknown>)[prop] = iso;
