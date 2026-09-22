@@ -50,7 +50,7 @@ export function OTPEntry({ route, navigation }: OTPEntryProps) {
   // ── OTP Verify mutation ────────────────────────────────────────────────────
   const verifyOtp = useMutation({
     mutationFn: (otp: string) =>
-      api.post(`/api/otp/${tripId}/verify`, { otp, eventType }).then(r => r.data),
+      api.post(`/api/otp/${tripId}/verify`, { code: otp, eventType }).then(r => r.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trip', tripId] });
       queryClient.invalidateQueries({ queryKey: ['my-trips'] });
