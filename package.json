@@ -5,7 +5,8 @@
   "private": true,
   "workspaces": [
     "apps/api",
-    "apps/web"
+    "apps/web",
+    "packages/shared"
   ],
   "scripts": {
     "dev:api": "npm run dev --workspace=apps/api",
