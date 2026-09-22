@@ -15,30 +15,13 @@ import {
 interface ReportSummary {
   period: { start: string; end: string };
   trips: {
-    total: number;
-    completed: number;
-    cancelled: number;
-    no_show: number;
-    completion_rate: number;
+    total_trips: string; completed: string; cancelled: string;
+    no_shows: string; avg_delay_minutes: string | null; total_miles: string | null;
   };
   otp: {
-    total_verifications: number;
-    verified: number;
-    fallback_photo: number;
-    verification_rate: number;
+    total_otp_events: string; verified: string; fallback_photos: string; expired: string;
   };
-  performance: {
-    avg_delay_minutes: number;
-    on_time_count: number;
-    on_time_percent: number;
-  };
-  drivers: Array<{
-    driver_id: number;
-    driver_name: string;
-    trips_completed: number;
-    on_time_percent: number;
-    total_miles: number;
-  }>;
+  drivers: Array<{ driver_name: string; completed: string; on_time_pct: string | null }>;
 }
 
 function fmt(date: Date) {
@@ -59,11 +42,19 @@ export function Reports() {
       api.get('/api/reports/summary', { params: { startDate, endDate } }).then(r => r.data),
   });
 
+  const totalTrips = Number(data?.trips.total_trips ?? 0);
+  const completed = Number(data?.trips.completed ?? 0);
+  const completionRate = totalTrips > 0 ? Math.round((completed / totalTrips) * 1000) / 10 : 0;
+  const otpTotal = Number(data?.otp.total_otp_events ?? 0);
+  const otpVerified = Number(data?.otp.verified ?? 0);
+  const verificationRate = otpTotal > 0 ? Math.round((otpVerified / otpTotal) * 1000) / 10 : 0;
+  const avgDelay = data?.trips.avg_delay_minutes != null ? Number(data.trips.avg_delay_minutes) : null;
+
   const handleExport = () => {
     if (!data) return;
     const rows = [
-      ['Driver', 'Trips Completed', 'On-Time %', 'Total Miles'],
-      ...data.drivers.map(d => [d.driver_name, d.trips_completed, d.on_time_percent, d.total_miles]),
+      ['Driver', 'Trips Completed', 'On-Time %'],
+      ...data.drivers.map(d => [d.driver_name, Number(d.completed), d.on_time_pct ?? '', '']),
     ];
     const csv = rows.map(r => r.join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -153,38 +144,38 @@ export function Reports() {
             <KPICard
               icon={<TrendingUp className="w-5 h-5 text-blue-500" />}
               label="Total Trips"
-              value={data.trips.total}
+              value={totalTrips}
               sub="in selected period"
               color="blue"
             />
             <KPICard
               icon={<CheckCircle2 className="w-5 h-5 text-green-500" />}
               label="Completion Rate"
-              value={`${data.trips.completion_rate}%`}
-              sub={`${data.trips.completed} completed`}
+              value={`${completionRate}%`}
+              sub={`${completed} completed`}
               color="green"
             />
             <KPICard
               icon={<Clock className="w-5 h-5 text-amber-500" />}
-              label="On-Time Rate"
-              value={`${data.performance.on_time_percent}%`}
-              sub={`avg delay ${data.performance.avg_delay_minutes}min`}
+              label="Avg Pickup Delay"
+              value={avgDelay != null ? `${avgDelay} min` : '—'}
+              sub="across completed trips"
               color="amber"
             />
             <KPICard
               icon={<ShieldCheck className="w-5 h-5 text-purple-500" />}
               label="OTP Verification"
-              value={`${data.otp.verification_rate}%`}
-              sub={`${data.otp.verified} / ${data.otp.total_verifications} trips`}
+              value={`${verificationRate}%`}
+              sub={`${otpVerified} / ${otpTotal} events`}
               color="purple"
             />
           </div>
 
           {/* Secondary stats */}
           <div className="grid sm:grid-cols-3 gap-4">
-            <StatBox label="No-Shows" value={data.trips.no_show} icon={<AlertTriangle className="w-4 h-4 text-red-500" />} />
-            <StatBox label="Cancelled" value={data.trips.cancelled} icon={<AlertTriangle className="w-4 h-4 text-amber-500" />} />
-            <StatBox label="Fallback Photos" value={data.otp.fallback_photo} icon={<ShieldCheck className="w-4 h-4 text-gray-500" />} />
+            <StatBox label="No-Shows" value={Number(data.trips.no_shows)} icon={<AlertTriangle className="w-4 h-4 text-red-500" />} />
+            <StatBox label="Cancelled" value={Number(data.trips.cancelled)} icon={<AlertTriangle className="w-4 h-4 text-amber-500" />} />
+            <StatBox label="Fallback Photos" value={Number(data.otp.fallback_photos)} icon={<ShieldCheck className="w-4 h-4 text-gray-500" />} />
           </div>
 
           {/* Driver performance table */}
@@ -200,23 +191,21 @@ export function Reports() {
                     <th className="text-left px-5 py-3 font-medium text-gray-600">Driver</th>
                     <th className="text-right px-5 py-3 font-medium text-gray-600">Trips</th>
                     <th className="text-right px-5 py-3 font-medium text-gray-600">On-Time</th>
-                    <th className="text-right px-5 py-3 font-medium text-gray-600 hidden md:table-cell">Miles</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.drivers.map((d) => (
-                    <tr key={d.driver_id} className="border-b border-gray-50 hover:bg-gray-50">
+                    <tr key={d.driver_name} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="px-5 py-3 font-medium text-gray-900">{d.driver_name}</td>
-                      <td className="px-5 py-3 text-right text-gray-700">{d.trips_completed}</td>
+                      <td className="px-5 py-3 text-right text-gray-700">{Number(d.completed)}</td>
                       <td className="px-5 py-3 text-right">
                         <span className={`font-medium ${
-                          d.on_time_percent >= 80 ? 'text-green-600' :
-                          d.on_time_percent >= 60 ? 'text-amber-600' : 'text-red-500'
+                          Number(d.on_time_pct) >= 80 ? 'text-green-600' :
+                          Number(d.on_time_pct) >= 60 ? 'text-amber-600' : 'text-red-500'
                         }`}>
-                          {d.on_time_percent}%
+                          {d.on_time_pct != null ? Number(d.on_time_pct) : '—'}%
                         </span>
                       </td>
-                      <td className="px-5 py-3 text-right text-gray-700 hidden md:table-cell">{d.total_miles}</td>
                     </tr>
                   ))}
                 </tbody>
