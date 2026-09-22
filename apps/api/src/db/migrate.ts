@@ -84,6 +84,102 @@ async function migrate() {
     `);
     logger.info('Schema migrations applied');
 
+    // Trip import feature: canonical trip fields + vendor profiles + LOS + uploads
+    await db.query(`
+      ALTER TABLE organizations ADD COLUMN IF NOT EXISTS timezone VARCHAR(50) NOT NULL DEFAULT 'America/New_York';
+
+      ALTER TABLE riders
+        ADD COLUMN IF NOT EXISTS first_name VARCHAR(100),
+        ADD COLUMN IF NOT EXISTS last_name  VARCHAR(100),
+        ADD COLUMN IF NOT EXISTS date_of_birth DATE,
+        ADD COLUMN IF NOT EXISTS medical_id VARCHAR(50);
+
+      ALTER TABLE trips
+        ADD COLUMN IF NOT EXISTS external_trip_id VARCHAR(100),
+        ADD COLUMN IF NOT EXISTS appointment_at TIMESTAMP WITH TIME ZONE,
+        ADD COLUMN IF NOT EXISTS level_of_service VARCHAR(20),
+        ADD COLUMN IF NOT EXISTS additional_passengers INTEGER DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS assistance_needs TEXT,
+        ADD COLUMN IF NOT EXISTS trip_type VARCHAR(50),
+        ADD COLUMN IF NOT EXISTS source_vendor_profile_id INTEGER,
+        ADD COLUMN IF NOT EXISTS import_job_id INTEGER;
+
+      CREATE TABLE IF NOT EXISTS vendor_profiles (
+        id SERIAL PRIMARY KEY,
+        org_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        name VARCHAR(200) NOT NULL,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE (org_id, name)
+      );
+
+      CREATE TABLE IF NOT EXISTS vendor_profile_versions (
+        id SERIAL PRIMARY KEY,
+        profile_id INTEGER NOT NULL REFERENCES vendor_profiles(id) ON DELETE CASCADE,
+        version INTEGER NOT NULL,
+        config JSONB NOT NULL,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE (profile_id, version)
+      );
+
+      DO $$ BEGIN
+        ALTER TABLE trips ADD CONSTRAINT trips_vendor_profile_fk
+          FOREIGN KEY (source_vendor_profile_id) REFERENCES vendor_profiles(id);
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+      CREATE TABLE IF NOT EXISTS levels_of_service (
+        id SERIAL PRIMARY KEY,
+        org_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        code VARCHAR(20) NOT NULL,
+        label VARCHAR(100) NOT NULL,
+        is_active BOOLEAN DEFAULT TRUE,
+        UNIQUE (org_id, code)
+      );
+
+      CREATE TABLE IF NOT EXISTS import_uploads (
+        id SERIAL PRIMARY KEY,
+        org_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        uploaded_by INTEGER REFERENCES users(id),
+        filename VARCHAR(255),
+        sha256 CHAR(64) NOT NULL,
+        content BYTEA NOT NULL,
+        detected_encoding VARCHAR(20),
+        row_count INTEGER,
+        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_import_uploads_org ON import_uploads(org_id, created_at DESC);
+
+      ALTER TABLE import_jobs
+        ADD COLUMN IF NOT EXISTS mode VARCHAR(20),
+        ADD COLUMN IF NOT EXISTS file_hash CHAR(64),
+        ADD COLUMN IF NOT EXISTS vendor_profile_version_id INTEGER REFERENCES vendor_profile_versions(id),
+        ADD COLUMN IF NOT EXISTS updated_rows INTEGER DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS duplicate_rows INTEGER DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS duplicate_policy VARCHAR(20),
+        ADD COLUMN IF NOT EXISTS result_trip_ids INTEGER[];
+
+      CREATE UNIQUE INDEX IF NOT EXISTS trips_external_id_unique
+        ON trips (org_id, source_vendor_profile_id, external_trip_id)
+        WHERE external_trip_id IS NOT NULL;
+    `);
+
+    await db.query(
+      `UPDATE organizations SET timezone = $1 WHERE slug = 'default' AND timezone = 'America/New_York'`,
+      [process.env.ORG_TIMEZONE || 'America/New_York']
+    );
+
+    await db.query(
+      `INSERT INTO levels_of_service (org_id, code, label)
+       SELECT o.id, x.code, x.label FROM organizations o
+       CROSS JOIN (VALUES ('AMB','Ambulatory'), ('STR','Stretcher'), ('WCH','Wheelchair')) AS x(code, label)
+       WHERE NOT EXISTS (SELECT 1 FROM levels_of_service l WHERE l.org_id = o.id)`
+    );
+    logger.info('Trip import schema applied');
+
     logger.info('Migration completed successfully');
   } catch (err) {
     logger.error('Migration failed', { error: (err as Error).message });
