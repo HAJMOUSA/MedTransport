@@ -6,7 +6,7 @@ import { authenticate } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 import { verifyOtp, recordFallback } from '../services/otp';
 import { query, queryOne } from '../db/pool';
-import { io } from '../index';
+import { getIo } from '../lib/io';
 
 const router = Router();
 router.use(authenticate);
@@ -65,7 +65,7 @@ router.post('/:tripId/verify',
       );
 
       // Notify dispatchers
-      io.to(`org:${req.user!.orgId}:dispatchers`).emit('trip:otp-verified', {
+      getIo().to(`org:${req.user!.orgId}:dispatchers`).emit('trip:otp-verified', {
         tripId,
         eventType,
         status: newStatus,
@@ -113,7 +113,7 @@ router.post('/:tripId/fallback',
         [newStatus, tripId, req.user!.orgId]
       );
 
-      io.to(`org:${req.user!.orgId}:dispatchers`).emit('trip:otp-verified', {
+      getIo().to(`org:${req.user!.orgId}:dispatchers`).emit('trip:otp-verified', {
         tripId,
         eventType,
         status: newStatus,

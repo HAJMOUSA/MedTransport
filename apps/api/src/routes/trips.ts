@@ -3,7 +3,7 @@ import { body, param, query as qv, validationResult } from 'express-validator';
 import { query, queryOne } from '../db/pool';
 import { authenticate, requireRole } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
-import { io } from '../index';
+import { getIo } from '../lib/io';
 import { logger } from '../lib/logger';
 import { geocodeAddress } from '../lib/geocode';
 
@@ -161,7 +161,7 @@ router.post('/',
       );
 
       // Notify dispatcher map in real time
-      io.to(`org:${req.user!.orgId}:dispatchers`).emit('trip:created', trip);
+      getIo().to(`org:${req.user!.orgId}:dispatchers`).emit('trip:created', trip);
 
       res.status(201).json(trip);
     } catch (err) { next(err); }
@@ -219,7 +219,7 @@ router.put('/:id',
 
       if (!trip) return next(new AppError('Trip not found', 404));
 
-      io.to(`org:${req.user!.orgId}:dispatchers`).emit('trip:updated', trip);
+      getIo().to(`org:${req.user!.orgId}:dispatchers`).emit('trip:updated', trip);
       res.json(trip);
     } catch (err) { next(err); }
   }
@@ -256,7 +256,7 @@ router.patch('/:id/status',
       if (!trip) return next(new AppError('Trip not found', 404));
 
       // Broadcast status change to all dispatchers
-      io.to(`org:${req.user!.orgId}:dispatchers`).emit('trip:status-changed', {
+      getIo().to(`org:${req.user!.orgId}:dispatchers`).emit('trip:status-changed', {
         tripId,
         status,
         timestamp: new Date().toISOString(),
@@ -284,7 +284,7 @@ router.patch('/:id/assign',
 
       if (!trip) return next(new AppError('Trip not found', 404));
 
-      io.to(`org:${req.user!.orgId}:dispatchers`).emit('trip:assigned', {
+      getIo().to(`org:${req.user!.orgId}:dispatchers`).emit('trip:assigned', {
         tripId: parseInt(req.params.id, 10),
         driverId,
         timestamp: new Date().toISOString(),
