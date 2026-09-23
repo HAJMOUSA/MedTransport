@@ -44,8 +44,8 @@ services:
   # ─── API (Node.js + Express) ────────────────────────────────────────────────
   api:
     build:
-      context: ./apps/api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/api/Dockerfile
     container_name: midtransport_api
     restart: unless-stopped
     networks:
@@ -69,8 +69,8 @@ services:
   # ─── Web (React + Vite + Nginx reverse proxy) ────────────────────────────────
   web:
     build:
-      context: ./apps/web
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/web/Dockerfile
       args:
         # Empty = use same origin (nginx proxies /api/ internally — no CORS ever)
         VITE_API_URL: ""
