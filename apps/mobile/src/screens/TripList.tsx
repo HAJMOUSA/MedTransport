@@ -154,7 +154,7 @@ export function TripList({ navigation }: { navigation: any }) {
 
   const allTrips = sections.flatMap(s => [
     { type: 'header' as const, title: s.title, id: `h-${s.title}` },
-    ...s.data.map(t => ({ type: 'trip' as const, ...t, id: String(t.id) })),
+    ...s.data.map(t => ({ type: 'trip' as const, ...t })),
   ]);
 
   return (
@@ -197,7 +197,7 @@ export function TripList({ navigation }: { navigation: any }) {
       ) : (
         <FlatList
           data={allTrips}
-          keyExtractor={item => item.id}
+          keyExtractor={item => String(item.id)}
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor="#2563eb" />}
           contentContainerStyle={styles.list}
           renderItem={({ item }) => {
