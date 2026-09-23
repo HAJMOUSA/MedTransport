@@ -22,7 +22,7 @@ interface TripDetail {
   rider_phone: string;
   pickup_address: string;
   dropoff_address: string;
-  scheduled_pickup_at: string;
+  scheduled_pickup_at: string | null; // null when will_call
   status: string;
   mobility_type: string;
   dispatcher_notes: string | null;
@@ -161,10 +161,12 @@ export function ActiveTrip({ route, navigation }: { route: any; navigation: any 
 
   const action = NEXT_STATUS[trip.status];
   const isDone = trip.status === 'completed' || trip.status === 'cancelled';
-  const scheduledTime = new Date(trip.scheduled_pickup_at).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const scheduledTime = trip.scheduled_pickup_at
+    ? new Date(trip.scheduled_pickup_at).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : 'Will Call';
 
   return (
     <SafeAreaView style={styles.container}>

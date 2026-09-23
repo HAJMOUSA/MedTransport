@@ -50,7 +50,7 @@ interface Trip {
   rider_name: string;
   driver_name: string | null;
   status: string;
-  scheduled_pickup_at: string;
+  scheduled_pickup_at: string | null; // null when will_call
 }
 
 interface LiveMapProps {
@@ -162,7 +162,9 @@ export function LiveMap({ initialDrivers = [], trips = [] }: LiveMapProps) {
                 <div className="font-medium">{trip.rider_name}</div>
                 <div className="text-blue-600">Pickup</div>
                 <div className="text-gray-500">
-                  {new Date(trip.scheduled_pickup_at).toLocaleTimeString([], { timeStyle: 'short' })}
+                  {trip.scheduled_pickup_at
+                    ? new Date(trip.scheduled_pickup_at).toLocaleTimeString([], { timeStyle: 'short' })
+                    : 'Will Call'}
                 </div>
               </div>
             </Popup>
