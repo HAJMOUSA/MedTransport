@@ -1,0 +1,40 @@
+# Version control
+.git
+.gitignore
+
+# Dependencies (installed inside the image)
+node_modules
+**/node_modules
+
+# Build output (built inside the image)
+dist
+**/dist
+build
+**/build
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# PII — vendor CSV exports must never enter images
+Documentation/
+docs/*.csv
+sample-riders.csv
+
+# Scratch / local tooling
+.superpowers/
+.opencode/
+.claude/
+pnpm-workspace.yaml
+pnpm-lock.yaml
+
+# Docs not needed at runtime
+docs/
+*.pdf
+PROPOSAL.md
+
+# Editor
+.vscode/
+*.code-workspace
+New folder/
