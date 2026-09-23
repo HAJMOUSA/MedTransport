@@ -135,15 +135,20 @@ router.get('/jobs/:id', async (req: Request, res: Response, next: NextFunction) 
 // ─── GET /api/import/trips/jobs/:id/errors.csv ──────────────────────────────
 router.get('/jobs/:id/errors.csv', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const job = await queryOne<{ errors: Array<{ row?: number; sourceTripId?: string | null; field?: string | null; code?: string; guidance?: string }> }>(
+    const job = await queryOne<{ errors: Array<{ row?: number; sourceTripId?: string | null; field?: string | null; code?: string; guidance?: string; message?: string }> }>(
       `SELECT errors FROM import_jobs WHERE id = $1 AND org_id = $2 AND import_type = 'trips'`,
       [req.params.id, req.user!.orgId]
     );
     if (!job) return next(new AppError('Import job not found', 404));
-    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const cell = (v: unknown): string => {
+      let s = String(v ?? '');
+      // Neutralize spreadsheet-formula prefixes (spec: notes/export safety)
+      if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+      return `"${s.replace(/"/g, '""')}"`;
+    };
     const lines = ['row,source_trip_id,field,code,guidance'];
     for (const e of job.errors ?? []) {
-      lines.push([e.row ?? '', e.sourceTripId ?? '', e.field ?? '', e.code ?? '', esc(e.guidance ?? '')].join(','));
+      lines.push([cell(e.row), cell(e.sourceTripId), cell(e.field), cell(e.code), cell(e.guidance ?? e.message)].join(','));
     }
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="import-${req.params.id}-errors.csv"`);
