@@ -22,8 +22,9 @@ export function ValidateStep({ state, update }: { state: WizardState; update: (p
   const execute = useMutation({
     mutationFn: () => api.post('/api/import/trips/execute', {
       uploadId: state.upload!.uploadId,
-      profileVersionId: state.profileVersionId,
-      profileId: state.profileId,
+      ...(state.profileVersionId
+        ? { profileVersionId: state.profileVersionId, ...(state.profileId !== null ? { profileId: state.profileId } : {}) }
+        : { inlineConfig: state.inlineConfig }),
       mappingOverrides: state.mappingOverrides,
       mode: state.mode,
       duplicatePolicy: state.duplicatePolicy,

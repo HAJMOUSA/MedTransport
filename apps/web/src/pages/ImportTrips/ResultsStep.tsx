@@ -27,7 +27,7 @@ export function ResultsStep({ state, update }: { state: WizardState; update: (p:
   };
 
   const reset = () => update({
-    step: 1, upload: null, profileId: null, profileVersionId: null,
+    step: 1, upload: null, profileId: null, profileVersionId: null, inlineConfig: null,
     mappingOverrides: {}, analysis: null, jobId: null,
     mode: 'valid_rows_only', duplicatePolicy: 'skip',
   });

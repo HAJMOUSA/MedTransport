@@ -4,13 +4,15 @@ import type { WizardState, AnalysisResult } from './types';
 
 export function PreviewStep({ state, update }: { state: WizardState; update: (p: Partial<WizardState>) => void }) {
   const { data, isLoading, error } = useQuery<AnalysisResult>({
-    queryKey: ['import-analyze', state.upload?.uploadId, state.profileVersionId, state.mappingOverrides],
+    queryKey: ['import-analyze', state.upload?.uploadId, state.profileVersionId, state.inlineConfig, state.mappingOverrides],
     queryFn: () => api.post('/api/import/trips/analyze', {
       uploadId: state.upload!.uploadId,
-      profileVersionId: state.profileVersionId,
       mappingOverrides: state.mappingOverrides,
+      ...(state.profileVersionId
+        ? { profileVersionId: state.profileVersionId }
+        : { inlineConfig: state.inlineConfig }),
     }).then(r => r.data),
-    enabled: state.upload !== null && state.profileVersionId !== null,
+    enabled: state.upload !== null && (state.profileVersionId !== null || state.inlineConfig !== null),
   });
 
   if (isLoading) return <p className="text-sm text-gray-500">Analyzing file…</p>;

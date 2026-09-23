@@ -16,6 +16,7 @@ export interface WizardState {
   upload: UploadInfo | null;
   profileId: number | null;         // vendor_profiles.id
   profileVersionId: number | null;  // vendor_profile_versions.id
+  inlineConfig: Record<string, unknown> | null; // unsaved config built on the map step (profileless import)
   mappingOverrides: Record<string, string>;
   analysis: AnalysisResult | null;
   mode: 'test' | 'all_or_nothing' | 'valid_rows_only';

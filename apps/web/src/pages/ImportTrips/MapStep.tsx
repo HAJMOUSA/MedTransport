@@ -162,8 +162,27 @@ export function MapStep({ state, update }: { state: WizardState; update: (p: Par
             />
           )}
           <button
-            disabled={missingRequired.length > 0 || state.profileVersionId === null}
-            onClick={() => update({ step: 3 })}
+            disabled={!(missingRequired.length === 0 && (state.profileVersionId !== null || state.profileId === null))}
+            onClick={() => {
+              // Profileless import: carry the effective mapping as an unsaved inline config.
+              // A selected profile keeps inlineConfig null so the saved version is used instead.
+              const inlineConfig = state.profileVersionId === null
+                ? {
+                    headerSignature: state.upload!.headers,
+                    columnMap: cleanedMap(effective),
+                    encoding: 'auto',
+                    delimiter: ',',
+                    dateFormat: 'M/d/yyyy',
+                    timeFormat: 'H:mm',
+                    dateTimeFormat: 'iso',
+                    timezone: 'America/New_York',
+                    valueTranslations: {},
+                    defaults: {},
+                    requiredOverrides: [],
+                  }
+                : null;
+              update({ inlineConfig, step: 3 });
+            }}
             className="bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-40"
           >
             Continue to preview →

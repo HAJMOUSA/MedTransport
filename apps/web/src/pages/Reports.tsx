@@ -52,9 +52,10 @@ export function Reports() {
 
   const handleExport = () => {
     if (!data) return;
+    const quoteCsv = (v: string) => `"${v.replace(/"/g, '""')}"`;
     const rows = [
       ['Driver', 'Trips Completed', 'On-Time %'],
-      ...data.drivers.map(d => [d.driver_name, Number(d.completed), d.on_time_pct ?? '', '']),
+      ...data.drivers.map(d => [quoteCsv(d.driver_name), String(Number(d.completed)), d.on_time_pct ?? '']),
     ];
     const csv = rows.map(r => r.join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -203,7 +204,7 @@ export function Reports() {
                           Number(d.on_time_pct) >= 80 ? 'text-green-600' :
                           Number(d.on_time_pct) >= 60 ? 'text-amber-600' : 'text-red-500'
                         }`}>
-                          {d.on_time_pct != null ? Number(d.on_time_pct) : '—'}%
+                          {d.on_time_pct != null ? `${Number(d.on_time_pct)}%` : '—'}
                         </span>
                       </td>
                     </tr>
