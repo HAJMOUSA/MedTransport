@@ -45,8 +45,9 @@ MidTransport is different:
 - Fallback: timestamped photo if rider has no phone
 
 ### 📋 Multiple Data Entry Methods
-- Manual trip entry form
-- CSV bulk import (drag-and-drop, column mapping, duplicate detection)
+- CSV bulk trip import with vendor profiles (auto-detected, versioned column mappings)
+- Guided import wizard: upload → map → masked preview → validate → import with duplicate policies
+- Simplified manual entry with address autocomplete, return-leg toggle, and shared validation
 - Broker API integration (Phase 2: ModivCare, MTM)
 
 ### 📊 Dispatcher Dashboard
