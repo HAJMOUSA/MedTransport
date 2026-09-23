@@ -74,7 +74,8 @@ export async function runAnalysis(
 
   // Rider match estimate (read-only): match on lower(first)+lower(last)+dob, else phone
   const riders = await query<{ id: number; first_name: string | null; last_name: string | null; name: string; date_of_birth: string | null; phone: string }>(
-    'SELECT id, first_name, last_name, name, date_of_birth, phone FROM riders WHERE org_id = $1 AND is_active = true', [orgId]);
+    // date_of_birth::text — node-pg parses DATE into JS Date by default; cast guarantees 'YYYY-MM-DD'
+    'SELECT id, first_name, last_name, name, date_of_birth::text AS date_of_birth, phone FROM riders WHERE org_id = $1 AND is_active = true', [orgId]);
   let matchedRiders = 0, newRiders = 0;
   for (const r of validated.results) {
     if (r.status === 'invalid') continue;

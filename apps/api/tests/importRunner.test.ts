@@ -146,9 +146,13 @@ describe('matchRider', () => {
     expect(matchRider([rider], trip)?.id).toBe(1);
   });
 
-  it('handles pg Date-object DOBs via string slice', () => {
-    const rider = { ...MATCHING_RIDER, date_of_birth: '1950-01-15T00:00:00.000Z' };
-    expect(matchRider([rider], trip)?.id).toBe(1);
+  it('DOB veto works on the cast YYYY-MM-DD rider strings the query now guarantees', () => {
+    // riders.date_of_birth is selected as date_of_birth::text, so matchRider
+    // always compares plain 'YYYY-MM-DD' strings — no pg Date parsing involved.
+    const sameDob = { ...MATCHING_RIDER, date_of_birth: '1950-01-15' };
+    expect(matchRider([sameDob], trip)?.id).toBe(1);       // name + DOB agree → match
+    const otherDob = { ...MATCHING_RIDER, date_of_birth: '1951-01-15' };
+    expect(matchRider([otherDob], trip)).toBeNull();        // name matches, DOB vetoes
   });
 
   it('splits legacy `name` when first_name/last_name are NULL', () => {
