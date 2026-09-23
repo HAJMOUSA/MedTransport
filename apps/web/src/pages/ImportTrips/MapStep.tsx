@@ -59,6 +59,8 @@ export function MapStep({ state, update }: { state: WizardState; update: (p: Par
 
   const requiredKeys = fields.filter(f => f.required).map(f => f.key);
   const mappedTargets = new Set(Object.values(effective).map(t => t.split('.')[0]));
+  // Engine falls back pickup_at ← appointment_at, so a mapped appointment_at covers pickup_at
+  if (mappedTargets.has('appointment_at')) mappedTargets.add('pickup_at');
   const missingRequired = requiredKeys.filter(k => !mappedTargets.has(k));
 
   const mappingOptions = fields.flatMap(f => {

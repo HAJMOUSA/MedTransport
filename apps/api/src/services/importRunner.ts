@@ -90,6 +90,8 @@ export async function runAnalysis(
   // Required canonical fields with no mapped source column can never produce a value —
   // surface one config-level issue per missing field (row 0; not counted per-row).
   const mappedTargets = new Set(Object.values(config.columnMap).map(t => t.split('.')[0]));
+  // Engine falls back pickup_at ← appointment_at, so a mapped appointment_at covers pickup_at
+  if (mappedTargets.has('appointment_at')) mappedTargets.add('pickup_at');
   const unmappedRequired: ImportIssue[] = [...required]
     .filter(key => !mappedTargets.has(key))
     .map(key => ({

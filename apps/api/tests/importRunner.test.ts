@@ -118,8 +118,9 @@ describe('runAnalysis', () => {
     const result = await runAnalysis(1, 10, { config, profileId: 30 });
 
     const unmapped = result.issues.filter(i => i.code === 'E_UNMAPPED_REQUIRED');
-    // vendor-a maps no pickup_at column either (appointment fallback), so both are flagged
-    expect(unmapped.map(i => i.field).sort()).toEqual(['pickup_at', 'primary_phone'].sort());
+    // vendor-a maps no pickup_at column, but appointment_at is mapped and the engine
+    // falls back pickup_at ← appointment_at — only primary_phone is flagged
+    expect(unmapped.map(i => i.field)).toEqual(['primary_phone']);
     for (const i of unmapped) {
       expect(i.row).toBe(0);
       expect(i.sourceTripId).toBeNull();
@@ -132,6 +133,23 @@ describe('runAnalysis', () => {
     // (row 1 now also fails its own E_REQUIRED_FIELD for primary_phone)
     expect(result.counts.total).toBe(3);
     expect(result.counts.invalid).toBe(3);
+  });
+
+  it('treats pickup_at as covered when appointment_at is mapped (engine fallback)', async () => {
+    mockDb([]);
+    // Minimal case: vendor-a profile with trip_type unmapped — appointment_at stays
+    // mapped (.date/.time), so pickup_at must NOT emit a row-0 advisory while the
+    // genuinely unmapped required trip_type still does.
+    const config = structuredClone(VENDOR_A_PROFILE);
+    for (const k of Object.keys(config.columnMap)) {
+      if (config.columnMap[k].split('.')[0] === 'trip_type') delete config.columnMap[k];
+    }
+    const result = await runAnalysis(1, 10, { config, profileId: 30 });
+
+    const unmapped = result.issues.filter(i => i.code === 'E_UNMAPPED_REQUIRED');
+    expect(unmapped).toHaveLength(1);
+    expect(unmapped[0]).toMatchObject({ row: 0, sourceTripId: null, field: 'trip_type', severity: 'error' });
+    expect(unmapped.some(i => i.field === 'pickup_at')).toBe(false);
   });
 
   it('prepends a conversion notice when the upload is windows-1252', async () => {
