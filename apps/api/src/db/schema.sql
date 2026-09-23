@@ -149,8 +149,9 @@ CREATE TABLE IF NOT EXISTS trips (
   pickup_address        TEXT NOT NULL,
   pickup_lat            DECIMAL(10, 8),
   pickup_lng            DECIMAL(11, 8),
-  scheduled_pickup_at   TIMESTAMP WITH TIME ZONE NOT NULL,
+  scheduled_pickup_at   TIMESTAMP WITH TIME ZONE,          -- NULL when will_call
   actual_pickup_at      TIMESTAMP WITH TIME ZONE,
+  will_call             BOOLEAN NOT NULL DEFAULT FALSE,    -- passenger calls when ready; no scheduled pickup time
 
   -- Dropoff details
   dropoff_address       TEXT NOT NULL,

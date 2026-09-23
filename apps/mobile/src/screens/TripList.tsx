@@ -23,7 +23,7 @@ interface Trip {
   rider_phone: string;
   pickup_address: string;
   dropoff_address: string;
-  scheduled_pickup_at: string;
+  scheduled_pickup_at: string | null; // null when will_call
   status: string;
   mobility_type: string;
   dispatcher_notes: string | null;
@@ -102,7 +102,9 @@ export function TripList({ navigation }: { navigation: any }) {
 
   const renderTrip = ({ item }: { item: Trip }) => {
     const isActive = activeTripStatuses.includes(item.status);
-    const time = new Date(item.scheduled_pickup_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const time = item.scheduled_pickup_at
+      ? new Date(item.scheduled_pickup_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : 'Will Call';
 
     return (
       <TouchableOpacity

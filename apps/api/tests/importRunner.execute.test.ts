@@ -216,6 +216,30 @@ describe('executeImport', () => {
     expect(jobUpdate[1][6]).toEqual([]); // no new trip ids
   });
 
+  it('will-call row with no pickup/appointment time inserts with will_call=true and NULL scheduled_pickup_at', async () => {
+    // Same vendor-a shape but Will Call Flag = Y and no Appointment Date/Time at all:
+    // valid per the engine (pickup_at exempt when will_call), so the row must not be lost.
+    const willCallRow = (ext: string, first: string, last: string, phone: string, dob: string) => {
+      const cells = validRow(ext, first, last, phone, dob).split(',');
+      cells[1] = '';    // Appointment Date
+      cells[29] = '';   // Time
+      cells[38] = 'Y';  // Will Call Flag
+      return cells.join(',');
+    };
+    const csv = csvWithRows([willCallRow('WC-001', 'WillCall', 'Person', '(313) 555-0009', '4/4/1954')]);
+    mockDb([], { content: csv });
+    await executeImport(makeOpts());
+
+    const tripInsert = clientQueryMock.mock.calls.find(c => String(c[0]).includes('INSERT INTO trips'))!;
+    const params = tripInsert[1] as unknown[];
+    expect(params[4]).toBeNull();  // scheduled_pickup_at = pickupAt ?? appointmentAt (both null)
+    expect(params[17]).toBe(true); // will_call
+
+    const jobUpdate = findCall(queryMock, "UPDATE import_jobs SET status = 'completed'")!;
+    expect(jobUpdate[1][0]).toBe(1);  // imported_rows — the valid will-call row is not lost
+    expect(jobUpdate[1][4]).toBe(0);  // error_rows
+  });
+
   it('auto-creates a rider when no rider matches and links the trip', async () => {
     mockDb([]); // no riders anywhere
     await executeImport(makeOpts());

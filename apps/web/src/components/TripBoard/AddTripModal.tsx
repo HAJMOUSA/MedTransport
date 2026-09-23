@@ -232,13 +232,13 @@ export function AddTripModal({ onClose }: { onClose: () => void }) {
   };
 
   const submit = () => {
-    const notes = form.willCall ? `[Will Call] ${form.notes}`.trim() : form.notes.trim();
+    const notes = form.notes.trim();
     const payload: Record<string, unknown> = {
       pickupAddress: addrToString(form.pickup),
       dropoffAddress: addrToString(form.dropoff),
-      // trips.scheduled_pickup_at is NOT NULL and there is no will_call column: use a neutral
-      // midday placeholder for will-call trips and flag them in dispatcher notes instead.
-      scheduledPickupAt: form.willCall ? toIso(form.serviceDate, '12:00') : toIso(form.serviceDate, form.pickupTime),
+      willCall: form.willCall,
+      // will-call trips persist with NULL scheduled_pickup_at (trips.will_call = true)
+      scheduledPickupAt: form.willCall ? null : toIso(form.serviceDate, form.pickupTime),
       levelOfService: form.levelOfService,
       tripType: form.tripType,
       additionalPassengers: form.additionalPassengers,

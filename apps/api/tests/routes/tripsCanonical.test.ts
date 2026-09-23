@@ -142,6 +142,38 @@ describe('POST /api/trips (extended)', () => {
     expect(mockQueryOne).toHaveBeenCalledTimes(2);
   });
 
+  it('accepts a will-call trip with no scheduledPickupAt and stores will_call=true', async () => {
+    mockQueryOne
+      .mockResolvedValueOnce({ id: 7 })   // rider insert
+      .mockResolvedValueOnce({ id: 103, will_call: true, scheduled_pickup_at: null, status: 'scheduled' }); // trip insert
+    const res = await request(app).post('/api/trips')
+      .set('Authorization', `Bearer ${token('dispatcher')}`)
+      .send({
+        pickupAddress: '1 Main St, Portland, ME 04101',
+        dropoffAddress: '2 Oak Ave, Portland, ME 04102',
+        willCall: true,
+        newRider: { firstName: 'Jane', lastName: 'Doe', phone: '2075551234' },
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.will_call).toBe(true);
+
+    const tripInsert = mockQueryOne.mock.calls[1];
+    const params = tripInsert[1] as unknown[];
+    expect(params[10]).toBeNull(); // scheduled_pickup_at
+    expect(params[22]).toBe(true); // will_call
+  });
+
+  it('still requires scheduledPickupAt when willCall is not set', async () => {
+    const res = await request(app).post('/api/trips')
+      .set('Authorization', `Bearer ${token('dispatcher')}`)
+      .send({
+        pickupAddress: '1 Main St, Portland, ME 04101',
+        dropoffAddress: '2 Oak Ave, Portland, ME 04102',
+        riderId: 5,
+      });
+    expect(res.status).toBe(400);
+  });
+
   it('creates an inline new rider and a return leg with swapped addresses', async () => {
     mockQueryOne
       .mockResolvedValueOnce({ id: 7 })                          // rider insert

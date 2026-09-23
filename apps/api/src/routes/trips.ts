@@ -160,7 +160,9 @@ router.post('/',
   body('riderId').if((_value, { req }) => !req.body.newRider).isInt(),
   body('pickupAddress').trim().notEmpty(),
   body('dropoffAddress').trim().notEmpty(),
-  body('scheduledPickupAt').isISO8601(),
+  // declared before scheduledPickupAt so toBoolean() runs before the conditional check below
+  body('willCall').optional().isBoolean().toBoolean(),
+  body('scheduledPickupAt').if((_value, { req }) => !req.body.willCall).isISO8601(),
   body('mobilityType').optional().isIn(['standard', 'wheelchair', 'stretcher', 'bariatric']),
   body('driverId').optional().isInt(),
   body('vehicleId').optional().isInt(),
@@ -193,8 +195,10 @@ router.post('/',
         mobilityType, driverId, vehicleId, dispatcherNotes,
         pickupLat, pickupLng, dropoffLat, dropoffLng,
         appointmentAt, levelOfService, additionalPassengers, assistanceNeeds,
-        tripType, externalTripId, newRider, returnTrip,
+        tripType, externalTripId, newRider, returnTrip, willCall,
       } = req.body as Record<string, unknown>;
+
+      const isWillCall = willCall === true;
 
       // Resolve rider: existing riderId, or insert an inline new rider
       let resolvedRiderId: number;
@@ -244,16 +248,16 @@ router.post('/',
         `INSERT INTO trips (org_id, rider_id, driver_id, vehicle_id, pickup_address, pickup_lat, pickup_lng,
            dropoff_address, dropoff_lat, dropoff_lng, scheduled_pickup_at, scheduled_dropoff_at,
            mobility_type, dispatcher_notes, status, created_by,
-           appointment_at, level_of_service, additional_passengers, assistance_needs, trip_type, external_trip_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::mobility_type,$14,$15::trip_status,$16,$17,$18,$19,$20,$21,$22)
+           appointment_at, level_of_service, additional_passengers, assistance_needs, trip_type, external_trip_id, will_call)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::mobility_type,$14,$15::trip_status,$16,$17,$18,$19,$20,$21,$22,$23)
          RETURNING *`,
         [req.user!.orgId, resolvedRiderId, resolvedDriverId, vehicleId || null,
          pickupAddress, resolvedPickupLat, resolvedPickupLng,
          dropoffAddress, resolvedDropoffLat, resolvedDropoffLng,
-         scheduledPickupAt, scheduledDropoffAt || null,
+         scheduledPickupAt || null, scheduledDropoffAt || null,
          mobilityType || 'standard', dispatcherNotes || null, initialStatus, req.user!.userId,
          appointmentAt || null, levelOfService || null, additionalPassengers ?? 0,
-         assistanceNeeds || null, tripType || null, externalTripId || null]
+         assistanceNeeds || null, tripType || null, externalTripId || null, isWillCall]
       );
 
       // Notify dispatcher map in real time
@@ -267,8 +271,8 @@ router.post('/',
           `INSERT INTO trips (org_id, rider_id, pickup_address, pickup_lat, pickup_lng,
              dropoff_address, dropoff_lat, dropoff_lng, scheduled_pickup_at,
              mobility_type, dispatcher_notes, status, created_by,
-             appointment_at, level_of_service, additional_passengers, assistance_needs, trip_type, external_trip_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::mobility_type,$11,'scheduled',$12,$13,$14,$15,$16,$17,$18)
+             appointment_at, level_of_service, additional_passengers, assistance_needs, trip_type, external_trip_id, will_call)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::mobility_type,$11,'scheduled',$12,$13,$14,$15,$16,$17,$18,$19)
            RETURNING *`,
           [req.user!.orgId, resolvedRiderId,
            dropoffAddress, resolvedDropoffLat, resolvedDropoffLng,
@@ -276,7 +280,7 @@ router.post('/',
            rt.pickupAt,
            mobilityType || 'standard', returnNotes, req.user!.userId,
            rt.appointmentAt || null, levelOfService || null, additionalPassengers ?? 0,
-           assistanceNeeds || null, tripType || null, externalTripId || null]
+           assistanceNeeds || null, tripType || null, externalTripId || null, isWillCall]
         );
         getIo().to(`org:${req.user!.orgId}:dispatchers`).emit('trip:created', returnLeg);
       }

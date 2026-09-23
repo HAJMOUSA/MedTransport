@@ -15,8 +15,8 @@ interface TripCardProps {
 }
 
 export function TripCard({ trip, onClick }: TripCardProps) {
-  const pickupTime = new Date(trip.scheduled_pickup_at);
-  const isLate = !trip.actual_pickup_at &&
+  const pickupTime = trip.scheduled_pickup_at ? new Date(trip.scheduled_pickup_at) : null;
+  const isLate = pickupTime !== null && !trip.actual_pickup_at &&
     ['en_route_pickup', 'dispatched'].includes(trip.status) &&
     new Date() > pickupTime;
 
@@ -53,7 +53,7 @@ export function TripCard({ trip, onClick }: TripCardProps) {
       {/* Time */}
       <div className="flex items-center gap-1.5 text-xs text-gray-600 mb-1.5">
         <Clock className="w-3.5 h-3.5 flex-shrink-0" />
-        <span className="font-medium">{format(pickupTime, 'h:mm a')}</span>
+        <span className="font-medium">{pickupTime ? format(pickupTime, 'h:mm a') : 'Will Call'}</span>
       </div>
 
       {/* Addresses */}

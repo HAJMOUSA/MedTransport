@@ -24,7 +24,7 @@ function emptyTrip(): CanonicalTrip {
 }
 
 const CAMEL: Record<string, keyof CanonicalTrip> = {
-  external_trip_id: 'externalTripId', appointment_at: 'appointmentAt', pickup_at: 'pickupAt',
+  external_trip_id: 'externalTripId', will_call: 'willCall', appointment_at: 'appointmentAt', pickup_at: 'pickupAt',
   passenger_first_name: 'passengerFirstName', passenger_last_name: 'passengerLastName',
   date_of_birth: 'dateOfBirth', medical_id: 'medicalId', primary_phone: 'primaryPhone',
   alternate_phone: 'alternatePhone', pickup_address: 'pickupAddress', dropoff_address: 'dropoffAddress',
