@@ -9,9 +9,16 @@ import { decodeCsv } from '../services/importEngine/encoding';
 import { parseCsv, CsvStructureError } from '../services/importEngine/csvParse';
 import { detectProfile, ProfileCandidate } from '../services/importEngine/profiles';
 import { executeImport, runAnalysis } from '../services/importRunner';
+import { CANONICAL_FIELDS } from '../services/importEngine/canonical';
 
 const router = Router();
 router.use(authenticate, requireRole('admin', 'dispatcher'));
+
+// ─── GET /api/import/trips/canonical-fields ─────────────────────────────────
+// Registered before any /:id param routes so it isn't captured as an id.
+router.get('/canonical-fields', (_req: Request, res: Response) => {
+  res.json(CANONICAL_FIELDS);
+});
 
 const upload = multer({
   storage: multer.memoryStorage(),
