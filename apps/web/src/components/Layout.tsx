@@ -24,6 +24,7 @@ const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
   { to: '/trips', icon: CalendarDays, label: 'Trips' },
   { to: '/riders', icon: Users, label: 'Riders' },
+  { to: '/import', icon: Upload, label: 'Import' },
   { to: '/drivers', icon: Car, label: 'Drivers' },
   { to: '/reports', icon: BarChart3, label: 'Reports' },
   { to: '/settings', icon: Settings, label: 'Settings' },

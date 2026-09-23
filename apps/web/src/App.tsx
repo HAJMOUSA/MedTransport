@@ -9,6 +9,8 @@ import { Riders } from './pages/Riders';
 import { Drivers } from './pages/Drivers';
 import { Reports } from './pages/Reports';
 import { Settings } from './pages/Settings';
+import { ImportTrips } from './pages/ImportTrips';
+import { ImportProfiles } from './pages/ImportProfiles';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -55,6 +57,8 @@ export default function App() {
             <Route index element={<Dashboard />} />
             <Route path="trips" element={<Trips />} />
             <Route path="riders" element={<Riders />} />
+            <Route path="import" element={<ImportTrips />} />
+            <Route path="import/profiles" element={<ImportProfiles />} />
             <Route path="drivers" element={<Drivers />} />
             <Route path="reports" element={<Reports />} />
             <Route path="settings" element={<Settings />} />
