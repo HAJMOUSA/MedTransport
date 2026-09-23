@@ -8,7 +8,7 @@ import { query, queryOne } from '../db/pool';
 import { decodeCsv } from '../services/importEngine/encoding';
 import { parseCsv, CsvStructureError } from '../services/importEngine/csvParse';
 import { detectProfile, ProfileCandidate } from '../services/importEngine/profiles';
-import { runAnalysis } from '../services/importRunner';
+import { executeImport, runAnalysis } from '../services/importRunner';
 
 const router = Router();
 router.use(authenticate, requireRole('admin', 'dispatcher'));
@@ -85,6 +85,35 @@ router.post('/analyze',
       const result = await runAnalysis(req.user!.orgId, uploadId, profileVersionId, mappingOverrides);
       const { validated, config, ...publicResult } = result; // don't leak full trips in preview
       res.json(publicResult);
+    } catch (err) { next(err); }
+  }
+);
+
+// ─── POST /api/import/trips/execute ────────────────────────────────────────
+router.post('/execute',
+  body('uploadId').isInt(), body('profileVersionId').isInt(), body('profileId').isInt(),
+  body('mode').isIn(['test', 'all_or_nothing', 'valid_rows_only']),
+  body('duplicatePolicy').isIn(['skip', 'reject', 'update']),
+  body('mappingOverrides').optional().isObject(),
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!validationResult(req).isEmpty()) return next(new AppError('Missing or invalid execute parameters', 400));
+    try {
+      const { uploadId, profileVersionId, profileId, mode, duplicatePolicy, mappingOverrides } = req.body;
+      if ((mode === 'all_or_nothing' || duplicatePolicy === 'update') && req.user!.role !== 'admin') {
+        return next(new AppError('All-or-nothing mode and update policy require an administrator', 403));
+      }
+      const uploadRow = await queryOne<{ filename: string; sha256: string }>(
+        'SELECT filename, sha256 FROM import_uploads WHERE id = $1 AND org_id = $2 AND expires_at > NOW()',
+        [uploadId, req.user!.orgId]
+      );
+      if (!uploadRow) return next(new AppError('Upload not found or expired — re-upload the file', 404));
+
+      const jobId = await executeImport({
+        orgId: req.user!.orgId, userId: req.user!.userId, userRole: req.user!.role,
+        uploadId, profileVersionId, profileId, mappingOverrides,
+        mode, duplicatePolicy, filename: uploadRow.filename, fileHash: uploadRow.sha256,
+      });
+      res.status(202).json({ jobId, statusUrl: `/api/import/trips/jobs/${jobId}` });
     } catch (err) { next(err); }
   }
 );

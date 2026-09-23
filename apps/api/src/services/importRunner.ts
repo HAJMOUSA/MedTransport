@@ -1,5 +1,7 @@
-import type { CanonicalTrip, ImportIssue, VendorProfileConfig } from '@midtransport/shared';
-import { query, queryOne } from '../db/pool';
+import type { CanonicalTrip, DuplicatePolicy, ImportIssue, ImportMode, VendorProfileConfig } from '@midtransport/shared';
+import { db, query, queryOne } from '../db/pool';
+import { geocodeAddress } from '../lib/geocode';
+import { logger } from '../lib/logger';
 import { AppError } from '../middleware/errorHandler';
 import { decodeCsv } from './importEngine/encoding';
 import { parseCsv } from './importEngine/csvParse';
@@ -132,4 +134,183 @@ export function matchRider(riders: RiderRow[], trip: CanonicalTrip): RiderRow | 
     }
     return !!phone && r.phone.replace(/\D/g, '') === phone;
   }) ?? null;
+}
+
+// ─── Execute ───────────────────────────────────────────────────────────────
+
+export interface ExecuteOptions {
+  orgId: number; userId: number; userRole: string; uploadId: number; profileVersionId: number;
+  profileId: number; mappingOverrides?: Record<string, string>;
+  mode: ImportMode; duplicatePolicy: DuplicatePolicy;
+  filename: string; fileHash: string;
+}
+
+export async function executeImport(opts: ExecuteOptions): Promise<number> {
+  // Analyze fresh at execute time — upload/profile may have changed since preview
+  const analysis = await runAnalysis(opts.orgId, opts.uploadId, opts.profileVersionId, opts.mappingOverrides);
+  const { validated } = analysis;
+
+  const job = await queryOne<{ id: number }>(
+    `INSERT INTO import_jobs (org_id, imported_by, import_type, filename, status, mode, file_hash, vendor_profile_version_id, duplicate_policy, total_rows)
+     VALUES ($1, $2, 'trips', $3, 'processing', $4, $5, $6, $7, $8) RETURNING id`,
+    [opts.orgId, opts.userId, opts.filename, opts.mode, opts.fileHash, opts.profileVersionId, opts.duplicatePolicy, analysis.counts.total]
+  );
+  const jobId = job!.id;
+
+  if (opts.mode === 'test') {
+    await finalizeJob(jobId, analysis, []);
+    return jobId;
+  }
+
+  if (opts.mode === 'all_or_nothing' && analysis.counts.invalid > 0) {
+    await query(
+      `UPDATE import_jobs SET status = 'failed', error_rows = $1, errors = $2, completed_at = NOW() WHERE id = $3`,
+      [analysis.counts.invalid, JSON.stringify(analysis.issues), jobId]
+    );
+    return jobId; // caller surfaces failed job with issues
+  }
+
+  const client = await db.connect();
+  const tripIds: number[] = [];
+  let created = 0, updated = 0, skipped = 0, duplicates = 0, failed = 0;
+  const errors: unknown[] = [];
+
+  try {
+    await client.query('BEGIN');
+    // date_of_birth::text — node-pg parses DATE into JS Date by default; cast guarantees 'YYYY-MM-DD'
+    const riders = (await client.query(
+      'SELECT id, first_name, last_name, name, date_of_birth::text AS date_of_birth, phone FROM riders WHERE org_id = $1 AND is_active = true',
+      [opts.orgId]
+    )).rows as RiderRow[];
+
+    for (const row of validated) {
+      const hasDupIssue = row.issues.some(i => i.code === 'E_DUPLICATE_IN_DB');
+      const otherErrors = row.issues.filter(i => i.severity === 'error' && i.code !== 'E_DUPLICATE_IN_DB');
+
+      if (otherErrors.length > 0) { failed++; errors.push(...otherErrors); continue; }
+
+      if (hasDupIssue) {
+        duplicates++;
+        if (opts.duplicatePolicy === 'skip') { skipped++; continue; }
+        if (opts.duplicatePolicy === 'reject') { failed++; errors.push(...row.issues.filter(i => i.code === 'E_DUPLICATE_IN_DB')); continue; }
+        // 'update' falls through to the UPDATE branch below
+      }
+
+      try {
+        const rider = matchRider(riders, row.trip) ?? await createRider(client, opts.orgId, row.trip, riders);
+        const t = row.trip;
+        const pickupStr = fmtAddr(t.pickupAddress);
+        const dropoffStr = fmtAddr(t.dropoffAddress);
+
+        if (hasDupIssue && opts.duplicatePolicy === 'update') {
+          await client.query(
+            `UPDATE trips SET rider_id=$1, pickup_address=$2, dropoff_address=$3,
+               scheduled_pickup_at=$4, appointment_at=$5, level_of_service=$6,
+               additional_passengers=$7, assistance_needs=$8, trip_type=$9,
+               distance_miles=$10, dispatcher_notes=$11, updated_at=NOW()
+             WHERE org_id=$12 AND source_vendor_profile_id=$13 AND external_trip_id=$14`,
+            [rider.id, pickupStr, dropoffStr, t.pickupAt, t.appointmentAt, t.levelOfService,
+             t.additionalPassengers, t.assistanceNeeds, t.tripType, t.distanceMiles, t.notes,
+             opts.orgId, opts.profileId, t.externalTripId]
+          );
+          updated++;
+          continue;
+        }
+
+        const inserted = await client.query(
+          `INSERT INTO trips (org_id, rider_id, pickup_address, dropoff_address,
+             scheduled_pickup_at, appointment_at, status, mobility_type,
+             external_trip_id, level_of_service, additional_passengers, assistance_needs,
+             trip_type, distance_miles, dispatcher_notes, source_vendor_profile_id,
+             import_job_id, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7::trip_status,'standard',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+           RETURNING id`,
+          [opts.orgId, rider.id, pickupStr, dropoffStr,
+           t.pickupAt ?? t.appointmentAt, t.appointmentAt, t.status ?? 'scheduled',
+           t.externalTripId, t.levelOfService, t.additionalPassengers, t.assistanceNeeds,
+           t.tripType, t.distanceMiles, t.notes, opts.profileId, jobId, opts.userId]
+        );
+        tripIds.push(inserted.rows[0].id);
+        created++;
+      } catch (err) {
+        failed++;
+        errors.push({ row: row.row, sourceTripId: row.trip.externalTripId, code: 'E_INSERT', message: (err as Error).message });
+      }
+    }
+
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    await query(`UPDATE import_jobs SET status = 'failed', completed_at = NOW() WHERE id = $1`, [jobId]);
+    client.release();
+    throw err;
+  }
+  client.release();
+
+  await query(
+    `UPDATE import_jobs SET status = 'completed', imported_rows = $1, updated_rows = $2,
+       skipped_rows = $3, duplicate_rows = $4, error_rows = $5, errors = $6,
+       result_trip_ids = $7, completed_at = NOW() WHERE id = $8`,
+    [created, updated, skipped, duplicates, failed, JSON.stringify([...analysis.issues.filter(i => i.severity === 'error'), ...errors].slice(0, 1000)), tripIds, jobId]
+  );
+
+  // Audit: generated trip IDs recorded, no sensitive values
+  await query(
+    `INSERT INTO audit_log (org_id, user_id, user_role, entity_type, entity_id, action, details)
+     VALUES ($1, $2, $3, 'import_job', $4, 'import_executed', $5)`,
+    [opts.orgId, opts.userId, opts.userRole, jobId, JSON.stringify({ mode: opts.mode, created, updated, skipped, duplicates, failed, tripIds })]
+  ).catch(() => {});
+
+  // Best-effort background geocoding (throttled per Nominatim policy) — fire and forget
+  geocodeImportedTrips(tripIds).catch(err => logger.warn('Background geocode failed', { error: err.message }));
+
+  return jobId;
+}
+
+async function createRider(
+  client: import('pg').PoolClient, orgId: number,
+  t: CanonicalTrip, riders: RiderRow[]
+): Promise<RiderRow> {
+  const name = [t.passengerFirstName, t.passengerLastName].filter(Boolean).join(' ');
+  const inserted = await client.query(
+    `INSERT INTO riders (org_id, name, first_name, last_name, date_of_birth, medical_id, phone, phone_alt, home_address, dispatcher_notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     RETURNING id, first_name, last_name, name, date_of_birth::text AS date_of_birth, phone`,
+    [orgId, name, t.passengerFirstName, t.passengerLastName, t.dateOfBirth, t.medicalId,
+     t.primaryPhone, t.alternatePhone, fmtAddr(t.pickupAddress),
+     t.assistanceNeeds ? `Assistance: ${t.assistanceNeeds}` : null]
+  );
+  const row = inserted.rows[0] as RiderRow;
+  riders.push(row); // subsequent rows for the same passenger match
+  return row;
+}
+
+function fmtAddr(a: { street: string; city: string; state: string; zip: string } | null): string {
+  return a ? [a.street, a.city, a.state, a.zip].filter(Boolean).join(', ') : '';
+}
+
+async function finalizeJob(jobId: number, analysis: AnalysisResult, tripIds: number[]): Promise<void> {
+  await query(
+    `UPDATE import_jobs SET status = 'completed', total_rows = $1, error_rows = $2, errors = $3, result_trip_ids = $4, completed_at = NOW() WHERE id = $5`,
+    [analysis.counts.total, analysis.counts.invalid, JSON.stringify(analysis.issues.slice(0, 1000)), tripIds, jobId]
+  );
+}
+
+async function geocodeImportedTrips(tripIds: number[]): Promise<void> {
+  for (const id of tripIds) {
+    const trip = await queryOne<{ pickup_address: string; dropoff_address: string }>(
+      'SELECT pickup_address, dropoff_address FROM trips WHERE id = $1', [id]);
+    if (!trip) continue;
+    const p = await geocodeAddress(trip.pickup_address);
+    const d = await geocodeAddress(trip.dropoff_address);
+    if (p || d) {
+      await query(
+        `UPDATE trips SET pickup_lat = COALESCE($1, pickup_lat), pickup_lng = COALESCE($2, pickup_lng),
+           dropoff_lat = COALESCE($3, dropoff_lat), dropoff_lng = COALESCE($4, dropoff_lng)
+         WHERE id = $5`,
+        [p?.lat ?? null, p?.lng ?? null, d?.lat ?? null, d?.lng ?? null, id]
+      );
+    }
+    await new Promise(r => setTimeout(r, 1100)); // Nominatim 1 req/s policy
+  }
 }
