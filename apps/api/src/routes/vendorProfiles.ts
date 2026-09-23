@@ -2,16 +2,22 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
 import { authenticate, requireRole } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
-import { query, queryOne } from '../db/pool';
+import { db, query, queryOne } from '../db/pool';
 import { isValidMappingTarget } from '../services/importEngine/canonical';
 
 const router = Router();
-router.use(authenticate);
+router.use(authenticate, requireRole('admin', 'dispatcher'));
 
-function validateConfig(config: Record<string, unknown>): string | null {
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+export function validateConfig(config: Record<string, unknown>): string | null {
   const required = ['headerSignature', 'columnMap', 'dateFormat', 'timeFormat', 'dateTimeFormat', 'timezone'];
   for (const k of required) if (config[k] === undefined) return `config.${k} is required`;
   if (!Array.isArray(config.headerSignature)) return 'config.headerSignature must be an array';
+  if (!isPlainObject(config.columnMap)) return 'config.columnMap must be an object mapping source columns to canonical fields';
+  if (!isPlainObject(config.valueTranslations)) return 'config.valueTranslations must be a plain object';
+  if (!isPlainObject(config.defaults)) return 'config.defaults must be a plain object';
   const columnMap = config.columnMap as Record<string, string>;
   for (const [source, target] of Object.entries(columnMap)) {
     if (!isValidMappingTarget(target)) return `Invalid mapping target "${target}" for column "${source}"`;
@@ -38,19 +44,28 @@ router.post('/', requireRole('admin'),
   body('config').isObject(),
   async (req: Request, res: Response, next: NextFunction) => {
     if (!validationResult(req).isEmpty()) return next(new AppError('name and config are required', 400));
+    const invalid = validateConfig(req.body.config);
+    if (invalid) return next(new AppError(invalid, 400));
+    // Profile + first version insert atomically — a failed version insert must not orphan the profile row.
+    const client = await db.connect();
     try {
-      const invalid = validateConfig(req.body.config);
-      if (invalid) return next(new AppError(invalid, 400));
-      const profile = await queryOne<{ id: number }>(
+      await client.query('BEGIN');
+      const profile = await client.query(
         'INSERT INTO vendor_profiles (org_id, name, created_by) VALUES ($1, $2, $3) RETURNING id',
         [req.user!.orgId, req.body.name, req.user!.userId]
       );
-      const version = await queryOne<{ id: number }>(
+      const version = await client.query(
         'INSERT INTO vendor_profile_versions (profile_id, version, config, created_by) VALUES ($1, 1, $2, $3) RETURNING id',
-        [profile!.id, JSON.stringify(req.body.config), req.user!.userId]
+        [profile.rows[0].id, JSON.stringify(req.body.config), req.user!.userId]
       );
-      res.status(201).json({ profileId: profile!.id, versionId: version!.id });
-    } catch (err) { next(err); }
+      await client.query('COMMIT');
+      res.status(201).json({ profileId: profile.rows[0].id, versionId: version.rows[0].id });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      next(err);
+    } finally {
+      client.release();
+    }
   }
 );
 

@@ -100,6 +100,8 @@ router.post('/validate-canonical',
   requireRole('admin', 'dispatcher'),
   body('trip').isObject(),
   async (req: Request, res: Response, next: NextFunction) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return next(new AppError(errors.array()[0].msg, 400));
     try {
       const { trip } = req.body as { trip: CanonicalTrip };
       const losRows = await query<{ code: string }>(
@@ -118,7 +120,7 @@ router.post('/validate-canonical',
            WHERE t.org_id = $1
              AND LOWER(COALESCE(r.first_name, split_part(r.name, ' ', 1))) = LOWER($2)
              AND LOWER(COALESCE(r.last_name, split_part(r.name, ' ', 2))) = LOWER($3)
-             AND DATE(t.scheduled_pickup_at AT TIME ZONE 'UTC') = DATE($4::timestamptz)
+             AND DATE(t.scheduled_pickup_at AT TIME ZONE 'UTC') = DATE($4::timestamptz AT TIME ZONE 'UTC')
              AND t.status NOT IN ('cancelled') LIMIT 1`,
           [req.user!.orgId, trip.passengerFirstName, trip.passengerLastName, trip.pickupAt]
         );

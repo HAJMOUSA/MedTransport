@@ -9,7 +9,9 @@ import { logger } from './lib/logger';
 const httpServer = createServer(app);
 const corsOrigin = process.env.APP_BASE_URL || 'http://localhost:3000';
 
-export const io = new SocketServer(httpServer, {
+// Not exported: all socket access goes through lib/io (setIo/getIo) so route
+// modules never import the server entrypoint (which would start listening).
+const io = new SocketServer(httpServer, {
   cors: { origin: corsOrigin, methods: ['GET', 'POST'], credentials: true },
   transports: ['websocket', 'polling'],
 });

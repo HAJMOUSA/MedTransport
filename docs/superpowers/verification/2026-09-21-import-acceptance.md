@@ -143,3 +143,9 @@
 | 8 | Permissions, audit, retention, privacy | VERIFIED-BY-TESTS (live audit/expiry checks remain) |
 
 All 8 criteria have their mechanisms proven by the 100-test API suite and green builds; AC 4 requires the live wizard walkthrough, and ACs 1, 2, 5, 6, 7, 8 list exact live-stack confirmation steps above to run with the real vendor files (which stay local and are never committed).
+
+## Known limitations
+
+- **Execute is synchronous within one request.** `POST /api/import/trips/execute` runs the whole import before responding (it now honestly returns `200` with the final job `status`, not `202`). A 10,000-row file can take minutes.
+- **Proxy ceiling.** The nginx `/api/` proxy allows up to 300s (`proxy_read_timeout`/`proxy_send_timeout`). Imports exceeding that limit still complete server-side — the connection may drop, but the job keeps running; re-check `GET /api/import/trips/jobs/:id` (`statusUrl` in the execute response) for the final state.
+- **Background queue is future work.** Moving execution to a real async job queue (with progress reporting) is deliberately out of scope for this branch.

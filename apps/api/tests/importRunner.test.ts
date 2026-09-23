@@ -9,7 +9,7 @@ const { queryMock, queryOneMock } = vi.hoisted(() => ({
 }));
 vi.mock('../src/db/pool', () => ({ query: queryMock, queryOne: queryOneMock }));
 
-import { runAnalysis, matchRider } from '../src/services/importRunner';
+import { runAnalysis, matchRider, loadProfileConfig } from '../src/services/importRunner';
 import type { RiderRow } from '../src/services/importRunner';
 import { AppError } from '../src/middleware/errorHandler';
 import { VENDOR_A_PROFILE } from './fixtures/profiles';
@@ -18,9 +18,12 @@ const buf = fs.readFileSync(path.join(__dirname, './fixtures/vendor-a.csv'));
 
 const LOS = [{ code: 'AMB' }, { code: 'STR' }, { code: 'WCH' }];
 
-function mockDb(riders: RiderRow[], opts?: { existingExtIds?: string[] }) {
+// Resolved config the routes would hand to runAnalysis for profile version 20 (profile 30)
+const resolved = () => ({ config: structuredClone(VENDOR_A_PROFILE), profileId: 30 });
+
+function mockDb(riders: RiderRow[], opts?: { existingExtIds?: string[]; content?: Buffer }) {
   queryOneMock.mockImplementation((sql: string) => {
-    if (sql.includes('FROM import_uploads')) return Promise.resolve({ content: buf, filename: 'vendor-a.csv' });
+    if (sql.includes('FROM import_uploads')) return Promise.resolve({ content: opts?.content ?? buf, filename: 'vendor-a.csv' });
     if (sql.includes('FROM vendor_profile_versions')) return Promise.resolve({ config: structuredClone(VENDOR_A_PROFILE), profileId: 30 });
     if (sql.includes('FROM organizations')) return Promise.resolve({ timezone: 'America/New_York' });
     return Promise.resolve(null);
@@ -46,7 +49,7 @@ beforeEach(() => {
 describe('runAnalysis', () => {
   it('runs full pipeline: counts, masked sample, recognized/unmapped headers', async () => {
     mockDb([MATCHING_RIDER]);
-    const result = await runAnalysis(1, 10, 20);
+    const result = await runAnalysis(1, 10, resolved());
 
     expect(result.counts.total).toBe(3);
     expect(result.counts.valid).toBe(1);
@@ -80,21 +83,21 @@ describe('runAnalysis', () => {
 
   it('counts newRiders when no rider matches', async () => {
     mockDb([]);
-    const result = await runAnalysis(1, 10, 20);
+    const result = await runAnalysis(1, 10, resolved());
     expect(result.counts.matchedRiders).toBe(0);
     expect(result.counts.newRiders).toBe(1); // invalid rows excluded from matching
   });
 
   it('flags duplicates already in DB', async () => {
     mockDb([], { existingExtIds: ['FAKE-A-001'] });
-    const result = await runAnalysis(1, 10, 20);
+    const result = await runAnalysis(1, 10, resolved());
     expect(result.counts.duplicates).toBeGreaterThan(0);
     expect(result.issues.some(i => i.code === 'E_DUPLICATE_IN_DB')).toBe(true);
   });
 
   it('applies mapping overrides to config and recognized headers', async () => {
     mockDb([]);
-    const result = await runAnalysis(1, 10, 20, { 'Trip Reason': 'notes' });
+    const result = await runAnalysis(1, 10, resolved(), { 'Trip Reason': 'notes' });
     expect(result.config.columnMap['Trip Reason']).toBe('notes');
     expect(result.recognized).toContain('Trip Reason');
     expect(result.unmapped).not.toContain('Trip Reason');
@@ -102,18 +105,66 @@ describe('runAnalysis', () => {
 
   it('404s when upload is missing or expired', async () => {
     queryOneMock.mockResolvedValue(null);
-    await expect(runAnalysis(1, 99, 20)).rejects.toMatchObject({ statusCode: 404 });
-    await expect(runAnalysis(1, 99, 20)).rejects.toBeInstanceOf(AppError);
+    await expect(runAnalysis(1, 99, resolved())).rejects.toMatchObject({ statusCode: 404 });
+    await expect(runAnalysis(1, 99, resolved())).rejects.toBeInstanceOf(AppError);
   });
 
+  it('prepends E_UNMAPPED_REQUIRED (row 0) for required fields with no mapped source column', async () => {
+    mockDb([]);
+    const config = structuredClone(VENDOR_A_PROFILE);
+    for (const k of Object.keys(config.columnMap)) {
+      if (config.columnMap[k].split('.')[0] === 'primary_phone') delete config.columnMap[k];
+    }
+    const result = await runAnalysis(1, 10, { config, profileId: 30 });
+
+    const unmapped = result.issues.filter(i => i.code === 'E_UNMAPPED_REQUIRED');
+    // vendor-a maps no pickup_at column either (appointment fallback), so both are flagged
+    expect(unmapped.map(i => i.field).sort()).toEqual(['pickup_at', 'primary_phone'].sort());
+    for (const i of unmapped) {
+      expect(i.row).toBe(0);
+      expect(i.sourceTripId).toBeNull();
+      expect(i.severity).toBe('error');
+      expect(i.guidance).toBeTruthy();
+    }
+    expect(result.issues[0].code).toBe('E_UNMAPPED_REQUIRED'); // prepended ahead of per-row issues
+
+    // row-0 issues don't inflate per-row counts: still 3 rows, all invalid
+    // (row 1 now also fails its own E_REQUIRED_FIELD for primary_phone)
+    expect(result.counts.total).toBe(3);
+    expect(result.counts.invalid).toBe(3);
+  });
+
+  it('prepends a conversion notice when the upload is windows-1252', async () => {
+    // Smart quotes as raw 0x93/0x94 bytes force windows-1252 detection (invalid UTF-8)
+    const win1252 = Buffer.from(
+      buf.toString('utf8')
+        .replace('Dialysis - bring chart', 'Dialysis \u201Cbring chart\u201D')
+        .replace(/\u201C/g, '\x93').replace(/\u201D/g, '\x94'),
+      'latin1'
+    );
+    mockDb([], { content: win1252 });
+    const result = await runAnalysis(1, 10, resolved());
+    expect(result.notices[0]).toBe('Converted Windows-1252 file to UTF-8');
+    expect(result.counts.total).toBe(3); // pipeline still parses fully
+  });
+
+  it('profileless (profileId: null) analysis dedupes only against other profileless imports', async () => {
+    mockDb([], { existingExtIds: ['FAKE-A-001'] });
+    const result = await runAnalysis(1, 10, { config: structuredClone(VENDOR_A_PROFILE), profileId: null });
+    const dupCall = queryMock.mock.calls.find(c => String(c[0]).includes('external_trip_id = ANY'))!;
+    expect(String(dupCall[0])).toContain('source_vendor_profile_id IS NULL');
+    expect(dupCall[1] as unknown[]).toHaveLength(2); // org + ext ids only — no profile param
+    expect(result.counts.duplicates).toBeGreaterThan(0);
+  });
+});
+
+describe('loadProfileConfig', () => {
   it('404s when profile version is not found for the org', async () => {
-    queryOneMock.mockImplementation((sql: string) => {
-      if (sql.includes('FROM import_uploads')) return Promise.resolve({ content: buf, filename: 'vendor-a.csv' });
-      return Promise.resolve(null); // profile version not found
-    });
-    await expect(runAnalysis(1, 10, 999)).rejects.toMatchObject({
+    queryOneMock.mockResolvedValue(null); // profile version not found
+    await expect(loadProfileConfig(1, 999)).rejects.toMatchObject({
       message: 'Vendor profile version not found', statusCode: 404,
     });
+    await expect(loadProfileConfig(1, 999)).rejects.toBeInstanceOf(AppError);
   });
 });
 

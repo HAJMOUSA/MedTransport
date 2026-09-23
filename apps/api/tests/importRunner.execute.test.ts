@@ -29,6 +29,7 @@ const MATCHING_RIDER: RiderRow = {
 function makeOpts(partial?: Partial<ExecuteOptions>): ExecuteOptions {
   return {
     orgId: 1, userId: 9, userRole: 'admin', uploadId: 10, profileVersionId: 20, profileId: 30,
+    config: structuredClone(VENDOR_A_PROFILE),
     mode: 'valid_rows_only', duplicatePolicy: 'skip',
     filename: 'vendor-a.csv', fileHash: 'abc123',
     ...partial,
@@ -267,6 +268,24 @@ describe('executeImport', () => {
     const jobUpdate = findCall(queryMock, "UPDATE import_jobs SET status = 'completed'")!;
     expect(jobUpdate[1][0]).toBe(1);  // imported_rows — the valid will-call row is not lost
     expect(jobUpdate[1][4]).toBe(0);  // error_rows
+  });
+
+  it('inline (profileless) import dedupes against NULL profile and inserts NULL source_vendor_profile_id', async () => {
+    mockDb([MATCHING_RIDER]);
+    await executeImport(makeOpts({ profileVersionId: null, profileId: null }));
+
+    // job row records a NULL vendor_profile_version_id
+    const jobInsert = findCall(queryOneMock, 'INSERT INTO import_jobs')!;
+    expect((jobInsert[1] as unknown[])[5]).toBeNull();
+
+    // dup query uses the IS NULL predicate with no profile param
+    const dupCall = queryMock.mock.calls.find(c => String(c[0]).includes('external_trip_id = ANY'))!;
+    expect(String(dupCall[0])).toContain('source_vendor_profile_id IS NULL');
+    expect(dupCall[1] as unknown[]).toHaveLength(2);
+
+    // trip row carries NULL source_vendor_profile_id
+    const insertParams = clientQueryMock.mock.calls.find(c => String(c[0]).includes('INSERT INTO trips'))![1] as unknown[];
+    expect(insertParams[14]).toBeNull();
   });
 
   it('auto-creates a rider when no rider matches and links the trip', async () => {

@@ -8,6 +8,7 @@ import { parseCsv } from './importEngine/csvParse';
 import { applyMapping } from './importEngine/mapping';
 import { validateRows, ValidateContext } from './importEngine/validate';
 import { requiredKeys } from './importEngine/canonical';
+import { ERROR_GUIDANCE } from './importEngine/errors';
 
 export interface MaskedSample {
   row: number; status: 'valid' | 'warning' | 'invalid';
@@ -40,7 +41,8 @@ export async function loadProfileConfig(orgId: number, versionId: number): Promi
 }
 
 export async function runAnalysis(
-  orgId: number, uploadId: number, profileVersionId: number,
+  orgId: number, uploadId: number,
+  resolved: { config: VendorProfileConfig; profileId: number | null },
   mappingOverrides?: Record<string, string>
 ): Promise<AnalysisResult> {
   const uploadRow = await queryOne<{ content: Buffer; filename: string }>(
@@ -49,33 +51,51 @@ export async function runAnalysis(
   );
   if (!uploadRow) throw new AppError('Upload not found or expired — re-upload the file', 404);
 
-  const { config, profileId } = await loadProfileConfig(orgId, profileVersionId);
+  const { config, profileId } = resolved;
   if (mappingOverrides) config.columnMap = { ...config.columnMap, ...mappingOverrides };
 
   const org = await queryOne<{ timezone: string }>('SELECT timezone FROM organizations WHERE id = $1', [orgId]);
-  const { text } = decodeCsv(uploadRow.content);
+  const { text, encoding } = decodeCsv(uploadRow.content);
   const parsed = parseCsv(text);
   const mapped = applyMapping(parsed, config, org?.timezone || 'America/New_York');
 
   // DB context: LOS codes + existing external IDs for this vendor profile.
   // Dedupe key is (org, vendor profile, external_trip_id) — manual-entry trips have
-  // NULL source_vendor_profile_id and must never match.
+  // NULL source_vendor_profile_id and must never match. Profileless (inline-config)
+  // imports carry profileId = null and dedupe only against other inline imports.
   const losRows = await query<{ code: string }>(
     'SELECT code FROM levels_of_service WHERE org_id = $1 AND is_active = true', [orgId]);
   const extIds = mapped.trips.map(t => t.externalTripId).filter((x): x is string => !!x);
   const dupRows = extIds.length > 0
-    ? await query<{ external_trip_id: string }>(
-        `SELECT external_trip_id FROM trips
-         WHERE org_id = $1 AND external_trip_id = ANY($2)
-           AND source_vendor_profile_id = $3`,
-        [orgId, extIds, profileId])
+    ? profileId === null
+      ? await query<{ external_trip_id: string }>(
+          `SELECT external_trip_id FROM trips
+           WHERE org_id = $1 AND external_trip_id = ANY($2)
+             AND source_vendor_profile_id IS NULL`,
+          [orgId, extIds])
+      : await query<{ external_trip_id: string }>(
+          `SELECT external_trip_id FROM trips
+           WHERE org_id = $1 AND external_trip_id = ANY($2)
+             AND source_vendor_profile_id = $3`,
+          [orgId, extIds, profileId])
     : [];
   const ctx: ValidateContext = {
     levelOfServiceCodes: losRows.map(r => r.code),
     existingExternalIds: new Set(dupRows.map(r => r.external_trip_id)),
   };
 
-  const validated = validateRows(mapped, requiredKeys(config.requiredOverrides), ctx);
+  const required = requiredKeys(config.requiredOverrides ?? []);
+  const validated = validateRows(mapped, required, ctx);
+
+  // Required canonical fields with no mapped source column can never produce a value —
+  // surface one config-level issue per missing field (row 0; not counted per-row).
+  const mappedTargets = new Set(Object.values(config.columnMap).map(t => t.split('.')[0]));
+  const unmappedRequired: ImportIssue[] = [...required]
+    .filter(key => !mappedTargets.has(key))
+    .map(key => ({
+      row: 0, sourceTripId: null, field: key,
+      code: 'E_UNMAPPED_REQUIRED', guidance: ERROR_GUIDANCE.E_UNMAPPED_REQUIRED, severity: 'error',
+    }));
 
   // Rider match estimate (read-only): match on lower(first)+lower(last)+dob, else phone
   const riders = await query<{ id: number; first_name: string | null; last_name: string | null; name: string; date_of_birth: string | null; phone: string }>(
@@ -105,11 +125,14 @@ export async function runAnalysis(
   }));
 
   const mappedSources = new Set(Object.keys(config.columnMap));
+  const notices = encoding === 'windows-1252'
+    ? ['Converted Windows-1252 file to UTF-8', ...mapped.notices]
+    : mapped.notices;
   return {
     counts: { ...validated.counts, matchedRiders, newRiders },
     sample,
-    notices: mapped.notices,
-    issues: validated.issues.slice(0, 500),
+    notices,
+    issues: [...unmappedRequired, ...validated.issues].slice(0, 500),
     headers: parsed.headers,
     recognized: parsed.headers.filter(h => mappedSources.has(h)),
     unmapped: parsed.headers.filter(h => !mappedSources.has(h)),
@@ -142,15 +165,22 @@ export function matchRider(riders: RiderRow[], trip: CanonicalTrip): RiderRow | 
 // ─── Execute ───────────────────────────────────────────────────────────────
 
 export interface ExecuteOptions {
-  orgId: number; userId: number; userRole: string; uploadId: number; profileVersionId: number;
-  profileId: number; mappingOverrides?: Record<string, string>;
+  orgId: number; userId: number; userRole: string; uploadId: number;
+  profileVersionId: number | null;    // null for profileless (inline-config) imports
+  profileId: number | null;           // resolved vendor_profiles.id; null for inline imports
+  config: VendorProfileConfig;        // resolved effective config (profile version or inline)
+  mappingOverrides?: Record<string, string>;
   mode: ImportMode; duplicatePolicy: DuplicatePolicy;
   filename: string; fileHash: string;
 }
 
 export async function executeImport(opts: ExecuteOptions): Promise<number> {
   // Analyze fresh at execute time — upload/profile may have changed since preview
-  const analysis = await runAnalysis(opts.orgId, opts.uploadId, opts.profileVersionId, opts.mappingOverrides);
+  const analysis = await runAnalysis(
+    opts.orgId, opts.uploadId,
+    { config: opts.config, profileId: opts.profileId },
+    opts.mappingOverrides
+  );
   const { validated } = analysis;
 
   const job = await queryOne<{ id: number }>(
@@ -273,7 +303,7 @@ export async function executeImport(opts: ExecuteOptions): Promise<number> {
     `INSERT INTO audit_log (org_id, user_id, user_role, entity_type, entity_id, action, details)
      VALUES ($1, $2, $3, 'import_job', $4, 'import_executed', $5)`,
     [opts.orgId, opts.userId, opts.userRole, jobId, JSON.stringify({ mode: opts.mode, created, updated, skipped, duplicates, failed, tripIds })]
-  ).catch(() => {});
+  ).catch((err) => logger.warn('import audit write failed', { error: (err as Error).message }));
 
   // Best-effort background geocoding (throttled per Nominatim policy) — fire and forget
   geocodeImportedTrips(tripIds).catch(err => logger.warn('Background geocode failed', { error: err.message }));

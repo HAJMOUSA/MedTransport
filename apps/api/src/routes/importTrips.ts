@@ -1,18 +1,43 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import crypto from 'crypto';
-import { body, validationResult } from 'express-validator';
+import { body, param, validationResult } from 'express-validator';
+import type { VendorProfileConfig } from '@midtransport/shared';
 import { authenticate, requireRole } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 import { query, queryOne } from '../db/pool';
 import { decodeCsv } from '../services/importEngine/encoding';
 import { parseCsv, CsvStructureError } from '../services/importEngine/csvParse';
 import { detectProfile, ProfileCandidate } from '../services/importEngine/profiles';
-import { executeImport, runAnalysis } from '../services/importRunner';
+import { executeImport, loadProfileConfig, runAnalysis } from '../services/importRunner';
 import { CANONICAL_FIELDS } from '../services/importEngine/canonical';
+import { validateConfig } from './vendorProfiles';
 
 const router = Router();
 router.use(authenticate, requireRole('admin', 'dispatcher'));
+
+// Exactly one of profileVersionId / inlineConfig must be supplied. A saved profile
+// version resolves to { config, profileId }; an inline (unsaved) config is validated
+// like a saved one and imports with profileId = null (dedupes only against other
+// profileless imports).
+async function resolveConfig(
+  orgId: number,
+  profileVersionId: unknown,
+  inlineConfig: unknown
+): Promise<{ config: VendorProfileConfig; profileId: number | null }> {
+  const hasVersion = profileVersionId !== undefined && profileVersionId !== null;
+  const hasInline = inlineConfig !== undefined && inlineConfig !== null;
+  if (hasVersion === hasInline) throw new AppError('Provide profileVersionId or inlineConfig', 400);
+  if (hasInline) {
+    if (typeof inlineConfig !== 'object' || Array.isArray(inlineConfig)) {
+      throw new AppError('inlineConfig must be an object', 400);
+    }
+    const invalid = validateConfig(inlineConfig as Record<string, unknown>);
+    if (invalid) throw new AppError(invalid, 400);
+    return { config: inlineConfig as VendorProfileConfig, profileId: null };
+  }
+  return loadProfileConfig(orgId, Number(profileVersionId));
+}
 
 // ─── GET /api/import/trips/canonical-fields ─────────────────────────────────
 // Registered before any /:id param routes so it isn't captured as an id.
@@ -83,13 +108,16 @@ router.post('/upload', upload.single('file'), async (req: Request, res: Response
 
 // ─── POST /api/import/trips/analyze ──────────────────────────────────────────
 router.post('/analyze',
-  body('uploadId').isInt(), body('profileVersionId').isInt(),
+  body('uploadId').isInt(),
+  body('profileVersionId').optional({ values: 'null' }).isInt(),
+  body('inlineConfig').optional({ values: 'null' }).isObject(),
   body('mappingOverrides').optional().isObject(),
   async (req: Request, res: Response, next: NextFunction) => {
-    if (!validationResult(req).isEmpty()) return next(new AppError('uploadId and profileVersionId are required', 400));
+    if (!validationResult(req).isEmpty()) return next(new AppError('Invalid analyze parameters', 400));
     try {
-      const { uploadId, profileVersionId, mappingOverrides } = req.body;
-      const result = await runAnalysis(req.user!.orgId, uploadId, profileVersionId, mappingOverrides);
+      const { uploadId, profileVersionId, inlineConfig, mappingOverrides } = req.body;
+      const resolved = await resolveConfig(req.user!.orgId, profileVersionId, inlineConfig);
+      const result = await runAnalysis(req.user!.orgId, uploadId, resolved, mappingOverrides);
       const { validated, config, ...publicResult } = result; // don't leak full trips in preview
       res.json(publicResult);
     } catch (err) { next(err); }
@@ -98,14 +126,17 @@ router.post('/analyze',
 
 // ─── POST /api/import/trips/execute ────────────────────────────────────────
 router.post('/execute',
-  body('uploadId').isInt(), body('profileVersionId').isInt(), body('profileId').isInt(),
+  body('uploadId').isInt(),
+  body('profileVersionId').optional({ values: 'null' }).isInt(),
+  body('inlineConfig').optional({ values: 'null' }).isObject(),
+  body('profileId').optional({ values: 'null' }).isInt(),
   body('mode').isIn(['test', 'all_or_nothing', 'valid_rows_only']),
   body('duplicatePolicy').isIn(['skip', 'reject', 'update']),
   body('mappingOverrides').optional().isObject(),
   async (req: Request, res: Response, next: NextFunction) => {
     if (!validationResult(req).isEmpty()) return next(new AppError('Missing or invalid execute parameters', 400));
     try {
-      const { uploadId, profileVersionId, profileId, mode, duplicatePolicy, mappingOverrides } = req.body;
+      const { uploadId, profileVersionId, inlineConfig, mode, duplicatePolicy, mappingOverrides } = req.body;
       if ((mode === 'all_or_nothing' || duplicatePolicy === 'update') && req.user!.role !== 'admin') {
         return next(new AppError('All-or-nothing mode and update policy require an administrator', 403));
       }
@@ -115,52 +146,71 @@ router.post('/execute',
       );
       if (!uploadRow) return next(new AppError('Upload not found or expired — re-upload the file', 404));
 
+      const resolved = await resolveConfig(req.user!.orgId, profileVersionId, inlineConfig);
       const jobId = await executeImport({
         orgId: req.user!.orgId, userId: req.user!.userId, userRole: req.user!.role,
-        uploadId, profileVersionId, profileId, mappingOverrides,
+        uploadId,
+        profileVersionId: profileVersionId ?? null,
+        profileId: resolved.profileId,
+        config: resolved.config,
+        mappingOverrides,
         mode, duplicatePolicy, filename: uploadRow.filename, fileHash: uploadRow.sha256,
       });
-      res.status(202).json({ jobId, statusUrl: `/api/import/trips/jobs/${jobId}` });
+      // The job runs synchronously within this request — read back its final state
+      // and report it honestly (200, not "accepted/pending" 202).
+      const job = await queryOne<{ status: string }>(
+        'SELECT status FROM import_jobs WHERE id = $1 AND org_id = $2',
+        [jobId, req.user!.orgId]
+      );
+      res.status(200).json({ jobId, status: job?.status ?? 'unknown', statusUrl: `/api/import/trips/jobs/${jobId}` });
     } catch (err) { next(err); }
   }
 );
 
 // ─── GET /api/import/trips/jobs/:id ─────────────────────────────────────────
-router.get('/jobs/:id', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const job = await queryOne(
-      `SELECT id, status, mode, duplicate_policy, filename, total_rows, imported_rows, updated_rows,
-              skipped_rows, duplicate_rows, error_rows, created_at, completed_at
-       FROM import_jobs WHERE id = $1 AND org_id = $2 AND import_type = 'trips'`,
-      [req.params.id, req.user!.orgId]
-    );
-    if (!job) return next(new AppError('Import job not found', 404));
-    res.json(job);
-  } catch (err) { next(err); }
-});
+router.get('/jobs/:id',
+  param('id').isInt(),
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!validationResult(req).isEmpty()) return next(new AppError('Invalid job id', 400));
+    try {
+      const job = await queryOne(
+        `SELECT id, status, mode, duplicate_policy, filename, total_rows, imported_rows, updated_rows,
+                skipped_rows, duplicate_rows, error_rows, created_at, completed_at
+         FROM import_jobs WHERE id = $1 AND org_id = $2 AND import_type = 'trips'`,
+        [req.params.id, req.user!.orgId]
+      );
+      if (!job) return next(new AppError('Import job not found', 404));
+      res.json(job);
+    } catch (err) { next(err); }
+  }
+);
 
 // ─── GET /api/import/trips/jobs/:id/errors.csv ──────────────────────────────
-router.get('/jobs/:id/errors.csv', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const job = await queryOne<{ errors: Array<{ row?: number; sourceTripId?: string | null; field?: string | null; code?: string; guidance?: string; message?: string }> }>(
-      `SELECT errors FROM import_jobs WHERE id = $1 AND org_id = $2 AND import_type = 'trips'`,
-      [req.params.id, req.user!.orgId]
-    );
-    if (!job) return next(new AppError('Import job not found', 404));
-    const cell = (v: unknown): string => {
-      let s = String(v ?? '');
-      // Neutralize spreadsheet-formula prefixes (spec: notes/export safety)
-      if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-      return `"${s.replace(/"/g, '""')}"`;
-    };
-    const lines = ['row,source_trip_id,field,code,guidance'];
-    for (const e of job.errors ?? []) {
-      lines.push([cell(e.row), cell(e.sourceTripId), cell(e.field), cell(e.code), cell(e.guidance ?? e.message)].join(','));
-    }
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="import-${req.params.id}-errors.csv"`);
-    res.send(lines.join('\n'));
-  } catch (err) { next(err); }
-});
+router.get('/jobs/:id/errors.csv',
+  param('id').isInt(),
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!validationResult(req).isEmpty()) return next(new AppError('Invalid job id', 400));
+    try {
+      const job = await queryOne<{ errors: Array<{ row?: number; sourceTripId?: string | null; field?: string | null; code?: string; guidance?: string; message?: string }> }>(
+        `SELECT errors FROM import_jobs WHERE id = $1 AND org_id = $2 AND import_type = 'trips'`,
+        [req.params.id, req.user!.orgId]
+      );
+      if (!job) return next(new AppError('Import job not found', 404));
+      const cell = (v: unknown): string => {
+        let s = String(v ?? '');
+        // Neutralize spreadsheet-formula prefixes (spec: notes/export safety)
+        if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+        return `"${s.replace(/"/g, '""')}"`;
+      };
+      const lines = ['row,source_trip_id,field,code,guidance'];
+      for (const e of job.errors ?? []) {
+        lines.push([cell(e.row), cell(e.sourceTripId), cell(e.field), cell(e.code), cell(e.guidance ?? e.message)].join(','));
+      }
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="import-${req.params.id}-errors.csv"`);
+      res.send(lines.join('\n'));
+    } catch (err) { next(err); }
+  }
+);
 
 export default router;

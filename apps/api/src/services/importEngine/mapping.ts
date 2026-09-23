@@ -3,7 +3,7 @@ import { CANONICAL_FIELDS } from './canonical';
 import type { ParsedCsv } from './csvParse';
 import { isValidTime, parseDate, parseDateTime } from './datetime';
 import { makeIssue } from './errors';
-import { normalizeName, normalizeNumeric, normalizePhone, normalizeText, normalizeZip } from './normalize';
+import { normalizeName, normalizeNumeric, normalizePhone, normalizeText } from './normalize';
 
 export interface MappingResult {
   trips: CanonicalTrip[];
@@ -34,7 +34,7 @@ const CAMEL: Record<string, keyof CanonicalTrip> = {
 };
 
 function translate(config: VendorProfileConfig, key: string, value: string): string {
-  const table = config.valueTranslations[key];
+  const table = config.valueTranslations?.[key];
   if (!table) return value;
   if (table[value] !== undefined) return table[value];
   const ci = Object.keys(table).find(k => k.toLowerCase() === value.toLowerCase());
@@ -54,7 +54,7 @@ export function applyMapping(parsed: ParsedCsv, config: VendorProfileConfig, org
 
     for (const [source, target] of Object.entries(config.columnMap)) {
       const raw = row[source];
-      if (raw === undefined || raw === '') continue;
+      if (raw === undefined || raw.trim() === '') continue;
       if (raw !== raw.trim()) trimmedCount++;
       const [key, suffix] = target.split('.');
 
@@ -115,7 +115,7 @@ export function applyMapping(parsed: ParsedCsv, config: VendorProfileConfig, org
     }
 
     // defaults for unmapped/unset fields
-    for (const [key, defVal] of Object.entries(config.defaults)) {
+    for (const [key, defVal] of Object.entries(config.defaults ?? {})) {
       const prop = CAMEL[key] as keyof CanonicalTrip | undefined;
       if (!prop) continue;
       const current = trip[prop];
