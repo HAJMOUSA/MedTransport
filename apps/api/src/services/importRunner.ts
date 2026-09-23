@@ -28,15 +28,15 @@ export interface AnalysisResult {
   validated: ReturnType<typeof validateRows>['results']; // internal — execute reuses
 }
 
-export async function loadProfileConfig(orgId: number, versionId: number): Promise<VendorProfileConfig> {
-  const row = await queryOne<{ config: VendorProfileConfig }>(
-    `SELECT v.config FROM vendor_profile_versions v
+export async function loadProfileConfig(orgId: number, versionId: number): Promise<{ config: VendorProfileConfig; profileId: number }> {
+  const row = await queryOne<{ config: VendorProfileConfig; profileId: number }>(
+    `SELECT v.config, p.id AS "profileId" FROM vendor_profile_versions v
      JOIN vendor_profiles p ON p.id = v.profile_id
      WHERE v.id = $1 AND p.org_id = $2 AND p.is_active = true`,
     [versionId, orgId]
   );
   if (!row) throw new AppError('Vendor profile version not found', 404);
-  return row.config;
+  return row;
 }
 
 export async function runAnalysis(
@@ -49,7 +49,7 @@ export async function runAnalysis(
   );
   if (!uploadRow) throw new AppError('Upload not found or expired — re-upload the file', 404);
 
-  const config = await loadProfileConfig(orgId, profileVersionId);
+  const { config, profileId } = await loadProfileConfig(orgId, profileVersionId);
   if (mappingOverrides) config.columnMap = { ...config.columnMap, ...mappingOverrides };
 
   const org = await queryOne<{ timezone: string }>('SELECT timezone FROM organizations WHERE id = $1', [orgId]);
@@ -57,15 +57,18 @@ export async function runAnalysis(
   const parsed = parseCsv(text);
   const mapped = applyMapping(parsed, config, org?.timezone || 'America/New_York');
 
-  // DB context: LOS codes + existing external IDs for this vendor
+  // DB context: LOS codes + existing external IDs for this vendor profile.
+  // Dedupe key is (org, vendor profile, external_trip_id) — manual-entry trips have
+  // NULL source_vendor_profile_id and must never match.
   const losRows = await query<{ code: string }>(
     'SELECT code FROM levels_of_service WHERE org_id = $1 AND is_active = true', [orgId]);
   const extIds = mapped.trips.map(t => t.externalTripId).filter((x): x is string => !!x);
   const dupRows = extIds.length > 0
     ? await query<{ external_trip_id: string }>(
         `SELECT external_trip_id FROM trips
-         WHERE org_id = $1 AND external_trip_id = ANY($2)`,
-        [orgId, extIds])
+         WHERE org_id = $1 AND external_trip_id = ANY($2)
+           AND source_vendor_profile_id = $3`,
+        [orgId, extIds, profileId])
     : [];
   const ctx: ValidateContext = {
     levelOfServiceCodes: losRows.map(r => r.code),
@@ -208,7 +211,7 @@ export async function executeImport(opts: ExecuteOptions): Promise<number> {
       await client.query('SAVEPOINT row_write');
       try {
         if (hasDupIssue && opts.duplicatePolicy === 'update') {
-          await client.query(
+          const upd = await client.query(
             `UPDATE trips SET rider_id=$1, pickup_address=$2, dropoff_address=$3,
                scheduled_pickup_at=$4, appointment_at=$5, level_of_service=$6,
                additional_passengers=$7, assistance_needs=$8, trip_type=$9,
@@ -219,7 +222,10 @@ export async function executeImport(opts: ExecuteOptions): Promise<number> {
              opts.orgId, opts.profileId, t.externalTripId, t.willCall]
           );
           await client.query('RELEASE SAVEPOINT row_write');
-          updated++;
+          // Safety net: the vendor-scoped analysis query guarantees the dup belongs to this
+          // profile, so rowCount is 1 in practice — but if the row matched nothing (deleted
+          // between analysis and execute), don't claim an update that never happened.
+          if ((upd.rowCount ?? 0) > 0) updated++; else skipped++;
           continue;
         }
 

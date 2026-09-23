@@ -21,7 +21,7 @@ const LOS = [{ code: 'AMB' }, { code: 'STR' }, { code: 'WCH' }];
 function mockDb(riders: RiderRow[], opts?: { existingExtIds?: string[] }) {
   queryOneMock.mockImplementation((sql: string) => {
     if (sql.includes('FROM import_uploads')) return Promise.resolve({ content: buf, filename: 'vendor-a.csv' });
-    if (sql.includes('FROM vendor_profile_versions')) return Promise.resolve({ config: structuredClone(VENDOR_A_PROFILE) });
+    if (sql.includes('FROM vendor_profile_versions')) return Promise.resolve({ config: structuredClone(VENDOR_A_PROFILE), profileId: 30 });
     if (sql.includes('FROM organizations')) return Promise.resolve({ timezone: 'America/New_York' });
     return Promise.resolve(null);
   });

@@ -37,19 +37,26 @@ function makeOpts(partial?: Partial<ExecuteOptions>): ExecuteOptions {
 
 let nextTripId = 9000;
 
-function mockDb(riders: RiderRow[], opts?: { existingExtIds?: string[]; content?: Buffer; failTripInsertFor?: string }) {
+function mockDb(riders: RiderRow[], opts?: { existingExtIds?: string[]; existingExtIdsProfileId?: number; profileId?: number; content?: Buffer; failTripInsertFor?: string }) {
   // Module-level pool functions: runAnalysis reads + job lifecycle writes
   queryOneMock.mockImplementation((sql: string) => {
     if (sql.includes('INSERT INTO import_jobs')) return Promise.resolve({ id: JOB_ID });
     if (sql.includes('FROM import_uploads')) return Promise.resolve({ content: opts?.content ?? buf, filename: 'vendor-a.csv' });
-    if (sql.includes('FROM vendor_profile_versions')) return Promise.resolve({ config: structuredClone(VENDOR_A_PROFILE) });
+    if (sql.includes('FROM vendor_profile_versions')) return Promise.resolve({ config: structuredClone(VENDOR_A_PROFILE), profileId: opts?.profileId ?? 30 });
     if (sql.includes('FROM organizations')) return Promise.resolve({ timezone: 'America/New_York' });
     if (sql.includes('FROM trips')) return Promise.resolve(null); // background geocode lookup → skip
     return Promise.resolve(null);
   });
-  queryMock.mockImplementation((sql: string) => {
+  queryMock.mockImplementation((sql: string, params?: unknown[]) => {
     if (sql.includes('FROM levels_of_service')) return Promise.resolve(LOS);
-    if (sql.includes('FROM trips')) return Promise.resolve((opts?.existingExtIds ?? []).map(id => ({ external_trip_id: id })));
+    if (sql.includes('FROM trips')) {
+      // Dup detection is vendor-scoped: when existingExtIdsProfileId is set, the ids only
+      // "exist" if the query's profile predicate (params[2]) targets that same profile.
+      if (opts?.existingExtIdsProfileId !== undefined && params?.[2] !== opts.existingExtIdsProfileId) {
+        return Promise.resolve([]);
+      }
+      return Promise.resolve((opts?.existingExtIds ?? []).map(id => ({ external_trip_id: id })));
+    }
     if (sql.includes('FROM riders')) return Promise.resolve(riders);
     return Promise.resolve([]); // UPDATE import_jobs / INSERT INTO audit_log
   });
@@ -72,7 +79,7 @@ function mockDb(riders: RiderRow[], opts?: { existingExtIds?: string[]; content?
       }
       return Promise.resolve({ rows: [{ id: ++nextTripId }] });
     }
-    if (sql.includes('UPDATE trips')) return Promise.resolve({ rows: [] });
+    if (sql.includes('UPDATE trips')) return Promise.resolve({ rows: [], rowCount: 1 });
     return Promise.resolve({ rows: [] });
   });
   connectMock.mockResolvedValue({ query: clientQueryMock, release: clientReleaseMock });
@@ -214,6 +221,28 @@ describe('executeImport', () => {
     expect(jobUpdate[1][1]).toBe(1);  // updated_rows
     expect(jobUpdate[1][3]).toBe(1);  // duplicates
     expect(jobUpdate[1][6]).toEqual([]); // no new trip ids
+  });
+
+  it('AC #5: same external id under a different vendor profile is NOT a duplicate — row imports clean', async () => {
+    // FAKE-A-001 already exists in trips under profile A (30). Importing the same id under
+    // profile B (31) must not raise E_DUPLICATE_IN_DB: dedupe key is (org, profile, ext id).
+    const PROFILE_A = 30, PROFILE_B = 31;
+    mockDb([MATCHING_RIDER], { profileId: PROFILE_B, existingExtIds: ['FAKE-A-001'], existingExtIdsProfileId: PROFILE_A });
+    await executeImport(makeOpts({ profileId: PROFILE_B }));
+
+    // the dup query carried the vendor-profile predicate, scoped to profile B
+    const dupCall = queryMock.mock.calls.find(c => String(c[0]).includes('external_trip_id = ANY'))!;
+    expect(String(dupCall[0])).toContain('source_vendor_profile_id');
+    expect((dupCall[1] as unknown[])[2]).toBe(PROFILE_B);
+
+    // no duplicate flagged → the valid row INSERTs and counts as created
+    expect(sqlOf(clientQueryMock).some(s => s.includes('INSERT INTO trips'))).toBe(true);
+    expect(sqlOf(clientQueryMock).some(s => s.includes('UPDATE trips'))).toBe(false);
+    const jobUpdate = findCall(queryMock, "UPDATE import_jobs SET status = 'completed'")!;
+    expect(jobUpdate[1][0]).toBe(1);  // imported_rows
+    expect(jobUpdate[1][1]).toBe(0);  // updated_rows
+    expect(jobUpdate[1][2]).toBe(0);  // skipped_rows
+    expect(jobUpdate[1][3]).toBe(0);  // duplicate_rows
   });
 
   it('will-call row with no pickup/appointment time inserts with will_call=true and NULL scheduled_pickup_at', async () => {
