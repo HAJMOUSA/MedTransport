@@ -118,4 +118,37 @@ router.post('/execute',
   }
 );
 
+// ─── GET /api/import/trips/jobs/:id ─────────────────────────────────────────
+router.get('/jobs/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const job = await queryOne(
+      `SELECT id, status, mode, duplicate_policy, filename, total_rows, imported_rows, updated_rows,
+              skipped_rows, duplicate_rows, error_rows, created_at, completed_at
+       FROM import_jobs WHERE id = $1 AND org_id = $2 AND import_type = 'trips'`,
+      [req.params.id, req.user!.orgId]
+    );
+    if (!job) return next(new AppError('Import job not found', 404));
+    res.json(job);
+  } catch (err) { next(err); }
+});
+
+// ─── GET /api/import/trips/jobs/:id/errors.csv ──────────────────────────────
+router.get('/jobs/:id/errors.csv', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const job = await queryOne<{ errors: Array<{ row?: number; sourceTripId?: string | null; field?: string | null; code?: string; guidance?: string }> }>(
+      `SELECT errors FROM import_jobs WHERE id = $1 AND org_id = $2 AND import_type = 'trips'`,
+      [req.params.id, req.user!.orgId]
+    );
+    if (!job) return next(new AppError('Import job not found', 404));
+    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const lines = ['row,source_trip_id,field,code,guidance'];
+    for (const e of job.errors ?? []) {
+      lines.push([e.row ?? '', e.sourceTripId ?? '', e.field ?? '', e.code ?? '', esc(e.guidance ?? '')].join(','));
+    }
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="import-${req.params.id}-errors.csv"`);
+    res.send(lines.join('\n'));
+  } catch (err) { next(err); }
+});
+
 export default router;
