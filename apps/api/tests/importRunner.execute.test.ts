@@ -37,11 +37,11 @@ function makeOpts(partial?: Partial<ExecuteOptions>): ExecuteOptions {
 
 let nextTripId = 9000;
 
-function mockDb(riders: RiderRow[], opts?: { existingExtIds?: string[] }) {
+function mockDb(riders: RiderRow[], opts?: { existingExtIds?: string[]; content?: Buffer; failTripInsertFor?: string }) {
   // Module-level pool functions: runAnalysis reads + job lifecycle writes
   queryOneMock.mockImplementation((sql: string) => {
     if (sql.includes('INSERT INTO import_jobs')) return Promise.resolve({ id: JOB_ID });
-    if (sql.includes('FROM import_uploads')) return Promise.resolve({ content: buf, filename: 'vendor-a.csv' });
+    if (sql.includes('FROM import_uploads')) return Promise.resolve({ content: opts?.content ?? buf, filename: 'vendor-a.csv' });
     if (sql.includes('FROM vendor_profile_versions')) return Promise.resolve({ config: structuredClone(VENDOR_A_PROFILE) });
     if (sql.includes('FROM organizations')) return Promise.resolve({ timezone: 'America/New_York' });
     if (sql.includes('FROM trips')) return Promise.resolve(null); // background geocode lookup → skip
@@ -57,18 +57,32 @@ function mockDb(riders: RiderRow[], opts?: { existingExtIds?: string[] }) {
   // Transaction client: command-appropriate results
   clientQueryMock.mockImplementation((sql: string, params?: unknown[]) => {
     if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return Promise.resolve({ rows: [] });
+    if (sql === 'SAVEPOINT row_write' || sql === 'RELEASE SAVEPOINT row_write' || sql === 'ROLLBACK TO SAVEPOINT row_write') {
+      return Promise.resolve({ rows: [] });
+    }
     if (sql.includes('INSERT INTO riders')) {
       return Promise.resolve({
         rows: [{ id: 77, first_name: params?.[2], last_name: params?.[3], name: params?.[1], date_of_birth: params?.[4], phone: params?.[6] }],
       });
     }
     if (sql.includes('FROM riders')) return Promise.resolve({ rows: riders });
-    if (sql.includes('INSERT INTO trips')) return Promise.resolve({ rows: [{ id: ++nextTripId }] });
+    if (sql.includes('INSERT INTO trips')) {
+      if (opts?.failTripInsertFor && params?.[7] === opts.failTripInsertFor) {
+        return Promise.reject(new Error('duplicate key value violates unique constraint "trips_external_id_unique"'));
+      }
+      return Promise.resolve({ rows: [{ id: ++nextTripId }] });
+    }
     if (sql.includes('UPDATE trips')) return Promise.resolve({ rows: [] });
     return Promise.resolve({ rows: [] });
   });
   connectMock.mockResolvedValue({ query: clientQueryMock, release: clientReleaseMock });
 }
+
+// Build a CSV with the vendor-a header and caller-supplied data rows (all valid by construction)
+const VENDOR_A_HEADER = buf.toString('utf8').split(/\r?\n/)[0];
+const validRow = (ext: string, first: string, last: string, phone: string, dob: string) =>
+  `,9/21/2026,Monday,N,N,500 Woodward Ave,Detroit,Clinic Main,(313) 555-9000,MI,48226,,Dialysis - bring chart,Wheelchair,,0011223344A,76,,${first},${last},${phone},0,,123 Main St,Detroit,MI,48201,N,Walker assistance,8:30,25.00,4.5,${ext},Dialysis,Scheduled,One Way,,Wheelchair Van,N,${dob},`;
+const csvWithRows = (rows: string[]): Buffer => Buffer.from([VENDOR_A_HEADER, ...rows].join('\n'), 'utf8');
 
 const sqlOf = (mock: typeof queryMock) => mock.mock.calls.map(c => String(c[0]));
 const findCall = (mock: typeof queryMock, fragment: string) =>
@@ -215,5 +229,36 @@ describe('executeImport', () => {
 
     const jobUpdate = findCall(queryMock, "UPDATE import_jobs SET status = 'completed'")!;
     expect(jobUpdate[1][0]).toBe(1);  // imported_rows
+  });
+
+  it('valid_rows_only recovers past a single-row insert failure via per-row savepoint', async () => {
+    const multi = csvWithRows([
+      validRow('FAKE-A-001', 'FakeFirst', 'FakeLast', '(313) 555-0001', '1/15/1950'),
+      validRow('FAKE-B-002', 'Second', 'Person', '(313) 555-0002', '2/2/1952'),
+      validRow('FAKE-C-003', 'Third', 'Human', '(313) 555-0003', '3/3/1953'),
+    ]);
+    mockDb([], { content: multi, failTripInsertFor: 'FAKE-B-002' });
+    await executeImport(makeOpts());
+
+    // Savepoint choreography: one SAVEPOINT per row, RELEASE on success, ROLLBACK TO on failure
+    const seq = sqlOf(clientQueryMock);
+    expect(seq.filter(s => s === 'SAVEPOINT row_write')).toHaveLength(3);
+    expect(seq.filter(s => s === 'RELEASE SAVEPOINT row_write')).toHaveLength(2);
+    expect(seq.filter(s => s === 'ROLLBACK TO SAVEPOINT row_write')).toHaveLength(1);
+    // the rollback belongs to the middle row: after the 2nd SAVEPOINT, before the 3rd
+    const spIdxs = seq.map((s, i) => (s === 'SAVEPOINT row_write' ? i : -1)).filter(i => i >= 0);
+    const rbIdx = seq.indexOf('ROLLBACK TO SAVEPOINT row_write');
+    expect(rbIdx).toBeGreaterThan(spIdxs[1]);
+    expect(rbIdx).toBeLessThan(spIdxs[2]);
+    expect(seq[seq.length - 1]).toBe('COMMIT');
+
+    // the other two rows still insert and persist; the failing row lands in errors
+    expect(seq.filter(s => s.includes('INSERT INTO trips'))).toHaveLength(3); // 2 ok + 1 failed attempt
+    const jobUpdate = findCall(queryMock, "UPDATE import_jobs SET status = 'completed'")!;
+    expect(jobUpdate[1][0]).toBe(2);             // imported_rows
+    expect(jobUpdate[1][4]).toBe(1);             // error_rows
+    expect(jobUpdate[1][6]).toEqual([9001, 9002]); // result_trip_ids — only real inserts
+    const errs = JSON.parse(jobUpdate[1][5] as string) as Array<{ code?: string; sourceTripId?: string }>;
+    expect(errs.some(e => e.code === 'E_INSERT' && e.sourceTripId === 'FAKE-B-002')).toBe(true);
   });
 });

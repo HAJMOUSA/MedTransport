@@ -196,12 +196,17 @@ export async function executeImport(opts: ExecuteOptions): Promise<number> {
         // 'update' falls through to the UPDATE branch below
       }
 
-      try {
-        const rider = matchRider(riders, row.trip) ?? await createRider(client, opts.orgId, row.trip, riders);
-        const t = row.trip;
-        const pickupStr = fmtAddr(t.pickupAddress);
-        const dropoffStr = fmtAddr(t.dropoffAddress);
+      // Rider match/create runs OUTSIDE the savepoint: if createRider fails it propagates
+      // to the outer catch → full ROLLBACK → job failed. That failure is honest — don't swallow it.
+      const rider = matchRider(riders, row.trip) ?? await createRider(client, opts.orgId, row.trip, riders);
+      const t = row.trip;
+      const pickupStr = fmtAddr(t.pickupAddress);
+      const dropoffStr = fmtAddr(t.dropoffAddress);
 
+      // Per-row savepoint: without it, one statement error aborts the whole transaction —
+      // every later statement fails and COMMIT silently rolls back, leaving created>0 but zero trips.
+      await client.query('SAVEPOINT row_write');
+      try {
         if (hasDupIssue && opts.duplicatePolicy === 'update') {
           await client.query(
             `UPDATE trips SET rider_id=$1, pickup_address=$2, dropoff_address=$3,
@@ -213,6 +218,7 @@ export async function executeImport(opts: ExecuteOptions): Promise<number> {
              t.additionalPassengers, t.assistanceNeeds, t.tripType, t.distanceMiles, t.notes,
              opts.orgId, opts.profileId, t.externalTripId]
           );
+          await client.query('RELEASE SAVEPOINT row_write');
           updated++;
           continue;
         }
@@ -230,9 +236,11 @@ export async function executeImport(opts: ExecuteOptions): Promise<number> {
            t.externalTripId, t.levelOfService, t.additionalPassengers, t.assistanceNeeds,
            t.tripType, t.distanceMiles, t.notes, opts.profileId, jobId, opts.userId]
         );
+        await client.query('RELEASE SAVEPOINT row_write');
         tripIds.push(inserted.rows[0].id);
         created++;
       } catch (err) {
+        await client.query('ROLLBACK TO SAVEPOINT row_write');
         failed++;
         errors.push({ row: row.row, sourceTripId: row.trip.externalTripId, code: 'E_INSERT', message: (err as Error).message });
       }
