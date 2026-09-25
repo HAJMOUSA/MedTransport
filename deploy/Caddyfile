@@ -1,0 +1,15 @@
+# MidTransport TLS reverse proxy — Caddy (automatic Let's Encrypt HTTPS)
+# Set DOMAIN on the server: e.g. DOMAIN=midtransport.yourdomain.com
+# or a free DuckDNS name: DOMAIN=midtransport.duckdns.org
+
+{$DOMAIN} {
+	reverse_proxy web:80
+
+	# WebSocket support (Socket.io live GPS) is automatic in Caddy v2.
+	# Security headers
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}

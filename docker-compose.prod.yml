@@ -1,0 +1,31 @@
+# Production overrides — use with: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Puts Caddy (TLS) in front of nginx; web/api stay internal to the docker network.
+
+services:
+  web:
+    # No host port published — reachable only via Caddy inside the network
+    ports: !reset []
+    expose:
+      - "80"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: midtransport_caddy
+    restart: unless-stopped
+    networks:
+      - midtransport
+    ports:
+      - "80:80"     # HTTP → ACME challenge + redirect to HTTPS
+      - "443:443"   # HTTPS
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env (e.g. midtransport.duckdns.org)}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+volumes:
+  caddy_data:
+  caddy_config:
