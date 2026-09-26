@@ -54,6 +54,12 @@ describe('suggestMapping', () => {
     expect(m['Phone Number']).toBeUndefined();
   });
 
+  it('one-to-one first header wins regardless of order', () => {
+    const b = suggestMapping(['Phone Number', 'Phone']);
+    expect(b['Phone Number']).toBe('primary_phone');
+    expect(b['Phone']).toBeUndefined();
+  });
+
   it('leaves ambiguous or unknown headers unmapped', () => {
     const m = suggestMapping(['City', 'State', 'Date', 'Name', 'Widget Count']);
     expect(m).toEqual({});

@@ -17,6 +17,7 @@ function tokens(s: string): string[] {
 
 // Order-independent token-set equality (confident match, no fuzzy scoring).
 function sameTokenSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false; // guard against repeated-token set collapse
   const sa = new Set(a);
   const sb = new Set(b);
   if (sa.size !== sb.size) return false;
@@ -30,7 +31,7 @@ function sameTokenSet(a: string[], b: string[]): boolean {
 const SYNONYMS: Record<string, string[]> = {
   external_trip_id: ['trip id', 'trip number', 'confirmation', 'confirmation number', 'reservation', 'reservation id', 'res id', 'leg id', 'vendor trip id', 'external id', 'external trip id'],
   will_call: ['will call', 'willcall', 'wc', 'on demand'],
-  appointment_at: ['appointment', 'appt', 'appointment time', 'appt time', 'appointment date', 'appt date'],
+  appointment_at: ['appointment', 'appt', 'appointment time', 'appt time'],
   pickup_at: ['pickup', 'pick up', 'pu', 'pickup time', 'pick up time', 'scheduled pickup', 'requested pickup', 'pickup datetime'],
   passenger_first_name: ['first name', 'fname', 'first', 'patient first name', 'member first name', 'rider first name', 'passenger first'],
   passenger_last_name: ['last name', 'lname', 'last', 'surname', 'patient last name', 'member last name', 'rider last name', 'passenger last'],
@@ -97,7 +98,8 @@ function matchHeader(header: string, isTaken: (target: string) => boolean): stri
     const aliases = [f.key.replace(/_/g, ' '), f.label, ...(SYNONYMS[f.key] ?? [])];
     for (const alias of aliases) {
       if (n === norm(alias) || sameTokenSet(t, tokens(alias))) {
-        return isTaken(f.key) ? null : f.key;
+        if (!isTaken(f.key)) return f.key;
+        break; // this field matched but its target is taken; try the next field
       }
     }
   }
