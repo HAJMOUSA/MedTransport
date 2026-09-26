@@ -36,7 +36,15 @@ export function MapStep({ state, update }: { state: WizardState; update: (p: Par
     () => profileDetail?.latestConfig?.columnMap ?? {},
     [profileDetail]
   );
-  const effective = useMemo(() => ({ ...savedMap, ...state.mappingOverrides }), [savedMap, state.mappingOverrides]);
+  const suggestedMap: Record<string, string> = useMemo(
+    () => state.upload?.suggestedMap ?? {},
+    [state.upload]
+  );
+  // Precedence: user edits > saved profile mapping > auto-suggested
+  const effective = useMemo(
+    () => ({ ...suggestedMap, ...savedMap, ...state.mappingOverrides }),
+    [suggestedMap, savedMap, state.mappingOverrides]
+  );
 
   const [draftProfileId, setDraftProfileId] = useState<number | null>(state.profileId);
 
@@ -105,6 +113,19 @@ export function MapStep({ state, update }: { state: WizardState; update: (p: Par
 
       {/* Column mapping table */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-100">
+          <span className="text-xs text-gray-500">
+            Fields are auto-matched where confident — review and adjust as needed.
+          </span>
+          {Object.keys(state.mappingOverrides).length > 0 && (
+            <button
+              onClick={() => update({ mappingOverrides: {} })}
+              className="text-xs text-blue-600 hover:underline"
+            >
+              Reset auto-matches
+            </button>
+          )}
+        </div>
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-100">
@@ -113,21 +134,32 @@ export function MapStep({ state, update }: { state: WizardState; update: (p: Par
             </tr>
           </thead>
           <tbody>
-            {state.upload?.headers.map(h => (
-              <tr key={h} className="border-b border-gray-50">
-                <td className="px-4 py-2 font-mono text-xs text-gray-800">{h}</td>
-                <td className="px-4 py-2">
-                  <select
-                    value={effective[h] ?? ''}
-                    onChange={e => update({ mappingOverrides: { ...state.mappingOverrides, [h]: e.target.value } })}
-                    className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm w-full max-w-xs"
-                  >
-                    <option value="">— ignore —</option>
-                    {mappingOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                </td>
-              </tr>
-            ))}
+            {state.upload?.headers.map(h => {
+              const val = effective[h] ?? '';
+              const isAuto = val !== '' && !(h in savedMap) && !(h in state.mappingOverrides) && suggestedMap[h] === val;
+              return (
+                <tr key={h} className="border-b border-gray-50">
+                  <td className="px-4 py-2 font-mono text-xs text-gray-800">{h}</td>
+                  <td className="px-4 py-2">
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={val}
+                        onChange={e => update({ mappingOverrides: { ...state.mappingOverrides, [h]: e.target.value } })}
+                        className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm w-full max-w-xs"
+                      >
+                        <option value="">— ignore —</option>
+                        {mappingOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                      {isAuto && (
+                        <span className="text-[10px] uppercase tracking-wide text-gray-400 border border-gray-200 rounded px-1.5 py-0.5">
+                          auto
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

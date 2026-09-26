@@ -2,6 +2,7 @@ export interface UploadInfo {
   uploadId: number; filename: string; sha256: string; encoding: string;
   delimiter: string; headers: string[]; rowCount: number;
   detectedProfile: { profileId: number; versionId: number; name: string; confidence: number } | null;
+  suggestedMap: Record<string, string>;
 }
 export interface AnalysisResult {
   counts: { total: number; valid: number; warning: number; invalid: number; duplicates: number; newRiders: number; matchedRiders: number };
