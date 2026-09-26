@@ -11,6 +11,7 @@ import { parseCsv, CsvStructureError } from '../services/importEngine/csvParse';
 import { detectProfile, ProfileCandidate } from '../services/importEngine/profiles';
 import { executeImport, loadProfileConfig, runAnalysis } from '../services/importRunner';
 import { CANONICAL_FIELDS } from '../services/importEngine/canonical';
+import { suggestMapping } from '../services/importEngine/suggest';
 import { validateConfig } from './vendorProfiles';
 
 const router = Router();
@@ -92,6 +93,7 @@ router.post('/upload', upload.single('file'), async (req: Request, res: Response
       [req.user!.orgId]
     );
     const detection = detectProfile(parsed.headers, candidates);
+    const suggestedMap = suggestMapping(parsed.headers);
 
     res.status(201).json({
       uploadId: staged!.id,
@@ -102,6 +104,7 @@ router.post('/upload', upload.single('file'), async (req: Request, res: Response
       headers: parsed.headers,
       rowCount: parsed.rows.length,
       detectedProfile: detection,
+      suggestedMap,
     });
   } catch (err) { next(err); }
 });
