@@ -17,7 +17,7 @@ function tokens(s: string): string[] {
 
 // Order-independent token-set equality (confident match, no fuzzy scoring).
 function sameTokenSet(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false; // guard against repeated-token set collapse
+  if (a.length !== b.length) return false; // guard: 'a a b b' (len 4) must not equal 'a b' (len 2) via set collapse
   const sa = new Set(a);
   const sb = new Set(b);
   if (sa.size !== sb.size) return false;

@@ -125,7 +125,7 @@ export function MapStep({ state, update }: { state: WizardState; update: (p: Par
               onClick={() => update({ mappingOverrides: {} })}
               className="text-xs text-blue-600 hover:underline"
             >
-              Reset to suggested mapping
+              Reset manual edits
             </button>
           )}
         </div>
