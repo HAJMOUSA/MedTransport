@@ -114,15 +114,18 @@ export function MapStep({ state, update }: { state: WizardState; update: (p: Par
       {/* Column mapping table */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-100">
-          <span className="text-xs text-gray-500">
-            Fields are auto-matched where confident — review and adjust as needed.
-          </span>
+          {Object.keys(suggestedMap).length > 0 ? (
+            <span className="text-xs text-gray-500">
+              Fields are auto-matched where confident — review and adjust as needed.
+            </span>
+          ) : <span />}
           {Object.keys(state.mappingOverrides).length > 0 && (
             <button
+              type="button"
               onClick={() => update({ mappingOverrides: {} })}
               className="text-xs text-blue-600 hover:underline"
             >
-              Reset auto-matches
+              Reset to suggested mapping
             </button>
           )}
         </div>
@@ -151,7 +154,10 @@ export function MapStep({ state, update }: { state: WizardState; update: (p: Par
                         {mappingOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                       </select>
                       {isAuto && (
-                        <span className="text-[10px] uppercase tracking-wide text-gray-400 border border-gray-200 rounded px-1.5 py-0.5">
+                        <span
+                          title="Auto-matched from your column name — you can change it"
+                          className="text-[10px] uppercase tracking-wide text-gray-400 border border-gray-200 rounded px-1.5 py-0.5"
+                        >
                           auto
                         </span>
                       )}
