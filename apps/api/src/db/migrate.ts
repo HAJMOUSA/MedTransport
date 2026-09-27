@@ -194,7 +194,7 @@ async function migrate() {
         id            SERIAL PRIMARY KEY,
         org_id        INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
         trip_id       INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
-        driver_id     INTEGER REFERENCES drivers(id),
+        driver_id     INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
         event_type    trip_event_type NOT NULL,
         reason_code   VARCHAR(40),
         note          TEXT,
@@ -204,7 +204,7 @@ async function migrate() {
         created_at    TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_trip_events_trip ON trip_events(trip_id);
-      CREATE INDEX IF NOT EXISTS idx_trip_events_org ON trip_events(org_id);
+      CREATE INDEX IF NOT EXISTS idx_trip_events_org ON trip_events(org_id, created_at DESC);
     `);
     logger.info('Trip events migration applied');
 

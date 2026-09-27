@@ -193,7 +193,7 @@ CREATE TABLE IF NOT EXISTS trip_events (
   id            SERIAL PRIMARY KEY,
   org_id        INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   trip_id       INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
-  driver_id     INTEGER REFERENCES drivers(id),
+  driver_id     INTEGER REFERENCES drivers(id) ON DELETE SET NULL,  -- preserve audit row if driver is removed
   event_type    trip_event_type NOT NULL,
   reason_code   VARCHAR(40),
   note          TEXT,
@@ -203,7 +203,7 @@ CREATE TABLE IF NOT EXISTS trip_events (
   created_at    TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 CREATE INDEX idx_trip_events_trip ON trip_events(trip_id);
-CREATE INDEX idx_trip_events_org ON trip_events(org_id);
+CREATE INDEX idx_trip_events_org ON trip_events(org_id, created_at DESC);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- DRIVER LOCATIONS (real-time GPS tracking)
