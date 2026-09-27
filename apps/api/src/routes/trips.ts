@@ -460,28 +460,30 @@ router.post('/:id/signature',
 );
 
 // ─── POST /api/trips/:id/no-show ─────────────────────────────────────────────
+// Driver-initiated field action (no requireRole), consistent with PATCH /:id/status.
 router.post('/:id/no-show',
   param('id').isInt(),
-  body('reasonCode').isIn(NO_SHOW_REASON_CODES as unknown as string[]),
+  body('reasonCode').trim().isIn(NO_SHOW_REASON_CODES as unknown as string[]),
   body('note').optional().trim().isLength({ max: 1000 }),
   body('lat').optional().isFloat(),
   body('lng').optional().isFloat(),
   async (req: Request, res: Response, next: NextFunction) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return next(new AppError('Invalid no-show request', 400));
-    await recordException(req, res, next, 'no_show', 'no_show');
+    return recordException(req, res, next, 'no_show', 'no_show');
   }
 );
 
 // ─── POST /api/trips/:id/cancellation ────────────────────────────────────────
+// Driver or dispatcher field action (no requireRole), consistent with PATCH /:id/status.
 router.post('/:id/cancellation',
   param('id').isInt(),
-  body('reasonCode').isIn(CANCELLATION_REASON_CODES as unknown as string[]),
+  body('reasonCode').trim().isIn(CANCELLATION_REASON_CODES as unknown as string[]),
   body('note').optional().trim().isLength({ max: 1000 }),
   async (req: Request, res: Response, next: NextFunction) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return next(new AppError('Invalid cancellation request', 400));
-    await recordException(req, res, next, 'cancellation', 'cancelled');
+    return recordException(req, res, next, 'cancellation', 'cancelled');
   }
 );
 

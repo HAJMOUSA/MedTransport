@@ -164,4 +164,15 @@ describe('POST /api/trips/:id/cancellation', () => {
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('cancelled');
   });
+
+  it('404 when trip not in org', async () => {
+    mockQueryOne
+      .mockResolvedValueOnce({ id: 7 }) // driver lookup
+      .mockResolvedValueOnce(null);     // trip lookup
+    const res = await request(app)
+      .post('/api/trips/5/cancellation')
+      .set('Authorization', `Bearer ${token('dispatcher')}`)
+      .send({ reasonCode: 'duplicate' });
+    expect(res.status).toBe(404);
+  });
 });
