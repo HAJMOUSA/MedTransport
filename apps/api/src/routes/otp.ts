@@ -61,15 +61,15 @@ router.post('/:tripId/verify',
       if (eventType === 'pickup') {
         newStatus = 'picked_up';
         await query(
-          `UPDATE trips SET status = $1, actual_pickup_at = NOW(), updated_at = NOW() WHERE id = $2`,
-          [newStatus, tripId]
+          `UPDATE trips SET status = $1, actual_pickup_at = NOW(), updated_at = NOW() WHERE id = $2 AND org_id = $3`,
+          [newStatus, tripId, req.user!.orgId]
         );
       } else {
         newStatus = 'arrived_dropoff';
         // Status stays arrived_dropoff; only record that dropoff OTP was verified.
         await query(
-          `UPDATE trips SET updated_at = NOW() WHERE id = $1`,
-          [tripId]
+          `UPDATE trips SET updated_at = NOW() WHERE id = $1 AND org_id = $2`,
+          [tripId, req.user!.orgId]
         );
       }
 

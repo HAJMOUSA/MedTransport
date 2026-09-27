@@ -98,7 +98,7 @@ Add to `RootStackParamList` and register as modal screens:
 
 **`SignatureCapture.tsx` (new)**
 - Full-screen signing pad via `react-native-signature-canvas` (WebView-backed, Expo-compatible). "Clear" + "Confirm".
-- On confirm: export PNG (base64 data URL) → write to a temp file with `expo-file-system` → upload via `POST /:id/signature` as multipart (matching the existing OTP photo-upload pattern) → on 2xx, `PATCH /:id/status` to `completed` (gate now passes) → navigate to `Main`.
+- On confirm: export PNG (base64 data URL) → send it in the JSON body of `POST /:id/signature` as `{ imageBase64 }` → on 2xx, `PATCH /:id/status` to `completed` (gate now passes) → navigate to `Main`. (A signature PNG is ~30–50 KB, well within the 10 MB JSON limit; sending base64 in JSON avoids React Native `FormData` file-uri pitfalls. This intentionally differs from the OTP fallback photo, which uses multer multipart. The server strips the data-URL prefix, decodes, and writes the PNG.)
 - Shows rider name + "Rider/attendant signature" caption.
 
 **`TripException.tsx` (new)**

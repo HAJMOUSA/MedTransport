@@ -410,6 +410,9 @@ router.patch('/:id/status',
 
 // ─── POST /api/trips/:id/signature ───────────────────────────────────────────
 // Driver captures rider/attendant signature at dropoff (required to complete).
+// Unlike the OTP fallback photo (multipart/multer), the signature PNG arrives as
+// a base64 data URL in the JSON body — it's small (~30–50 KB) and this avoids RN
+// FormData file-uri pitfalls. Decoded and written to disk below.
 router.post('/:id/signature',
   param('id').isInt(),
   body('imageBase64').isString().notEmpty(),
