@@ -13,6 +13,7 @@ import { TripList } from './src/screens/TripList';
 import { ActiveTrip } from './src/screens/ActiveTrip';
 import { OTPEntry } from './src/screens/OTPEntry';
 import { SignatureCapture } from './src/screens/SignatureCapture';
+import { TripException } from './src/screens/TripException';
 
 export type RootStackParamList = {
   Login: undefined;
@@ -20,6 +21,7 @@ export type RootStackParamList = {
   ActiveTrip: { tripId: number };
   OTPEntry: { tripId: number; eventType: 'pickup' | 'dropoff' };
   SignatureCapture: { tripId: number };
+  TripException: { tripId: number; mode: 'no_show' | 'cancellation' };
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -73,6 +75,11 @@ function RootNavigator() {
             <Stack.Screen
               name="SignatureCapture"
               component={SignatureCapture}
+              options={{ presentation: 'modal' }}
+            />
+            <Stack.Screen
+              name="TripException"
+              component={TripException}
               options={{ presentation: 'modal' }}
             />
           </>

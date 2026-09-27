@@ -264,6 +264,23 @@ export function ActiveTrip({ route, navigation }: { route: any; navigation: any 
         </View>
       )}
 
+      {!isDone && (
+        <View style={styles.exceptionRow}>
+          <TouchableOpacity
+            style={styles.exceptionBtn}
+            onPress={() => navigation.navigate('TripException', { tripId, mode: 'no_show' })}
+          >
+            <Text style={styles.exceptionText}>Report No-Show</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.exceptionBtn}
+            onPress={() => navigation.navigate('TripException', { tripId, mode: 'cancellation' })}
+          >
+            <Text style={styles.exceptionText}>Cancel Trip</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {isDone && (
         <View style={styles.actionBar}>
           <View style={styles.completedBadge}>
@@ -355,4 +372,10 @@ const styles = StyleSheet.create({
     borderColor: '#bbf7d0',
   },
   completedText: { fontSize: 17, fontWeight: '700', color: '#15803d' },
+  exceptionRow: { flexDirection: 'row', gap: 12, marginTop: 16, paddingHorizontal: 16 },
+  exceptionBtn: {
+    flex: 1, borderWidth: 1, borderColor: '#fca5a5', borderRadius: 10,
+    paddingVertical: 12, alignItems: 'center',
+  },
+  exceptionText: { color: '#dc2626', fontWeight: '600', fontSize: 14 },
 });
