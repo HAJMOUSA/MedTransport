@@ -110,3 +110,58 @@ describe('POST /api/trips/:id/signature', () => {
     expect(res.body).toMatchObject({ tripId: 5, eventType: 'signature' });
   });
 });
+
+describe('POST /api/trips/:id/no-show', () => {
+  it('rejects invalid reason code', async () => {
+    const res = await request(app)
+      .post('/api/trips/5/no-show')
+      .set('Authorization', `Bearer ${token('driver')}`)
+      .send({ reasonCode: 'not_a_reason' });
+    expect(res.status).toBe(400);
+  });
+
+  it('404 when trip not in org', async () => {
+    mockQueryOne
+      .mockResolvedValueOnce({ id: 7 }) // driver lookup
+      .mockResolvedValueOnce(null);     // trip lookup
+    const res = await request(app)
+      .post('/api/trips/5/no-show')
+      .set('Authorization', `Bearer ${token('driver')}`)
+      .send({ reasonCode: 'rider_not_present' });
+    expect(res.status).toBe(404);
+  });
+
+  it('records event + sets status no_show', async () => {
+    mockQueryOne
+      .mockResolvedValueOnce({ id: 7 })   // driver lookup
+      .mockResolvedValueOnce({ id: 5 });  // trip lookup
+    const res = await request(app)
+      .post('/api/trips/5/no-show')
+      .set('Authorization', `Bearer ${token('driver')}`)
+      .send({ reasonCode: 'rider_not_present', note: 'Waited 5 min' });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('no_show');
+  });
+});
+
+describe('POST /api/trips/:id/cancellation', () => {
+  it('rejects invalid reason code', async () => {
+    const res = await request(app)
+      .post('/api/trips/5/cancellation')
+      .set('Authorization', `Bearer ${token('dispatcher')}`)
+      .send({ reasonCode: 'nope' });
+    expect(res.status).toBe(400);
+  });
+
+  it('records event + sets status cancelled', async () => {
+    mockQueryOne
+      .mockResolvedValueOnce({ id: 7 })   // driver lookup
+      .mockResolvedValueOnce({ id: 5 });  // trip lookup
+    const res = await request(app)
+      .post('/api/trips/5/cancellation')
+      .set('Authorization', `Bearer ${token('dispatcher')}`)
+      .send({ reasonCode: 'duplicate' });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('cancelled');
+  });
+});

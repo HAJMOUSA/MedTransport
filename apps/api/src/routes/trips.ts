@@ -11,6 +11,7 @@ import { logger } from '../lib/logger';
 import { geocodeAddress } from '../lib/geocode';
 import { validateRows } from '../services/importEngine/validate';
 import { requiredKeys } from '../services/importEngine/canonical';
+import { NO_SHOW_REASON_CODES, CANCELLATION_REASON_CODES } from '../lib/reasonCodes';
 
 const router = Router();
 router.use(authenticate);
@@ -457,6 +458,73 @@ router.post('/:id/signature',
     } catch (err) { next(err); }
   }
 );
+
+// ─── POST /api/trips/:id/no-show ─────────────────────────────────────────────
+router.post('/:id/no-show',
+  param('id').isInt(),
+  body('reasonCode').isIn(NO_SHOW_REASON_CODES as unknown as string[]),
+  body('note').optional().trim().isLength({ max: 1000 }),
+  body('lat').optional().isFloat(),
+  body('lng').optional().isFloat(),
+  async (req: Request, res: Response, next: NextFunction) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return next(new AppError('Invalid no-show request', 400));
+    await recordException(req, res, next, 'no_show', 'no_show');
+  }
+);
+
+// ─── POST /api/trips/:id/cancellation ────────────────────────────────────────
+router.post('/:id/cancellation',
+  param('id').isInt(),
+  body('reasonCode').isIn(CANCELLATION_REASON_CODES as unknown as string[]),
+  body('note').optional().trim().isLength({ max: 1000 }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return next(new AppError('Invalid cancellation request', 400));
+    await recordException(req, res, next, 'cancellation', 'cancelled');
+  }
+);
+
+// Shared handler for no-show / cancellation events.
+async function recordException(
+  req: Request, res: Response, next: NextFunction,
+  eventType: 'no_show' | 'cancellation',
+  newStatus: 'no_show' | 'cancelled',
+) {
+  try {
+    const tripId = parseInt(req.params.id, 10);
+    const { reasonCode, note, lat, lng } = req.body as {
+      reasonCode: string; note?: string; lat?: number; lng?: number;
+    };
+
+    const driver = await queryOne<{ id: number }>(
+      'SELECT id FROM drivers WHERE user_id = $1', [req.user!.userId]
+    );
+
+    const trip = await queryOne<{ id: number }>(
+      'SELECT id FROM trips WHERE id = $1 AND org_id = $2', [tripId, req.user!.orgId]
+    );
+    if (!trip) return next(new AppError('Trip not found', 404));
+
+    await query(
+      `INSERT INTO trip_events (org_id, trip_id, driver_id, event_type, reason_code, note, lat, lng)
+       VALUES ($1, $2, $3, $4::trip_event_type, $5, $6, $7, $8)`,
+      [req.user!.orgId, tripId, driver?.id ?? null, eventType, reasonCode, note ?? null,
+       lat ?? null, lng ?? null]
+    );
+
+    await query(
+      `UPDATE trips SET status = $1::trip_status, updated_at = NOW() WHERE id = $2 AND org_id = $3`,
+      [newStatus, tripId, req.user!.orgId]
+    );
+
+    getIo().to(`org:${req.user!.orgId}:dispatchers`).emit('trip:status-changed', {
+      tripId, status: newStatus, timestamp: new Date().toISOString(),
+    });
+
+    res.json({ tripId, status: newStatus, eventType });
+  } catch (err) { next(err); }
+}
 
 // ─── PATCH /api/trips/:id/assign ─────────────────────────────────────────────
 router.patch('/:id/assign',
