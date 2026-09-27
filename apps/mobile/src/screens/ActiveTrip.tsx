@@ -15,6 +15,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSocket } from '../hooks/useSocket';
 import { useDriverProfile } from '../hooks/useDriverProfile';
 import { api } from '../lib/api';
+import { openNavigation } from '../lib/navigation';
 
 interface TripDetail {
   id: number;
@@ -28,6 +29,10 @@ interface TripDetail {
   dispatcher_notes: string | null;
   driver_name: string | null;
   vehicle_name: string | null;
+  pickup_lat: number | null;
+  pickup_lng: number | null;
+  dropoff_lat: number | null;
+  dropoff_lng: number | null;
 }
 
 const NEXT_STATUS: Record<string, { label: string; next: string; color: string }> = {
@@ -212,12 +217,10 @@ export function ActiveTrip({ route, navigation }: { route: any; navigation: any 
           <Text style={styles.cardTitle}>Pickup · {scheduledTime}</Text>
           <Text style={styles.addressText}>{trip.pickup_address}</Text>
           <TouchableOpacity
-            onPress={() => Linking.openURL(
-              `https://maps.google.com/?q=${encodeURIComponent(trip.pickup_address)}`
-            )}
-            style={[styles.navBtn, { backgroundColor: '#eff6ff' }]}
+            style={styles.navBtn}
+            onPress={() => openNavigation({ lat: trip.pickup_lat, lng: trip.pickup_lng, address: trip.pickup_address })}
           >
-            <Text style={[styles.navBtnText, { color: '#2563eb' }]}>🗺  Navigate to Pickup</Text>
+            <Text style={styles.navBtnText}>🧭 Navigate</Text>
           </TouchableOpacity>
         </View>
 
@@ -226,12 +229,10 @@ export function ActiveTrip({ route, navigation }: { route: any; navigation: any 
           <Text style={styles.cardTitle}>Dropoff</Text>
           <Text style={styles.addressText}>{trip.dropoff_address}</Text>
           <TouchableOpacity
-            onPress={() => Linking.openURL(
-              `https://maps.google.com/?q=${encodeURIComponent(trip.dropoff_address)}`
-            )}
-            style={[styles.navBtn, { backgroundColor: '#f0fdf4' }]}
+            style={styles.navBtn}
+            onPress={() => openNavigation({ lat: trip.dropoff_lat, lng: trip.dropoff_lng, address: trip.dropoff_address })}
           >
-            <Text style={[styles.navBtnText, { color: '#16a34a' }]}>🗺  Navigate to Dropoff</Text>
+            <Text style={styles.navBtnText}>🧭 Navigate</Text>
           </TouchableOpacity>
         </View>
 
@@ -316,12 +317,14 @@ const styles = StyleSheet.create({
   notes: { fontSize: 13, color: '#6b7280', fontStyle: 'italic', marginTop: 4 },
   addressText: { fontSize: 15, color: '#374151', lineHeight: 22 },
   navBtn: {
-    borderRadius: 12,
-    padding: 12,
-    alignItems: 'center',
-    marginTop: 4,
+    marginTop: 8,
+    alignSelf: 'flex-start',
+    backgroundColor: '#eff6ff',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
   },
-  navBtnText: { fontSize: 15, fontWeight: '600' },
+  navBtnText: { color: '#2563eb', fontWeight: '600', fontSize: 14 },
   warningCard: {
     backgroundColor: '#fffbeb',
     borderWidth: 1,
