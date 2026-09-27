@@ -2,9 +2,9 @@ import React, { useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import SignatureScreen, { SignatureViewRef } from 'react-native-signature-canvas';
-import * as FileSystem from 'expo-file-system';
 import * as Location from 'expo-location';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { AxiosError } from 'axios';
 import { api } from '../lib/api';
 
 export function SignatureCapture({ route, navigation }: { route: any; navigation: any }) {
@@ -15,13 +15,8 @@ export function SignatureCapture({ route, navigation }: { route: any; navigation
 
   const submit = useMutation({
     mutationFn: async (signatureDataUrl: string) => {
-      // signatureDataUrl looks like "data:image/png;base64,...."
-      const base64 = signatureDataUrl.replace(/^data:image\/\w+;base64,/, '');
-      const fileUri = `${FileSystem.cacheDirectory}signature-${tripId}.png`;
-      await FileSystem.writeAsStringAsync(fileUri, base64, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
+      // signatureDataUrl is a "data:image/png;base64,...." URL — sent as-is; the
+      // server strips the prefix, decodes, and stores the PNG.
       let lat: number | undefined;
       let lng: number | undefined;
       try {
@@ -29,19 +24,27 @@ export function SignatureCapture({ route, navigation }: { route: any; navigation
         if (loc) { lat = loc.coords.latitude; lng = loc.coords.longitude; }
       } catch { /* location optional */ }
 
+      // Signature must be saved before completing — the status gate depends on it.
       await api.post(`/api/trips/${tripId}/signature`, {
         imageBase64: signatureDataUrl, lat, lng,
       });
       await api.patch(`/api/trips/${tripId}/status`, { status: 'completed' });
     },
     onSuccess: () => {
+      setSubmitting(false);
       queryClient.invalidateQueries({ queryKey: ['trip', tripId] });
       queryClient.invalidateQueries({ queryKey: ['my-trips'] });
       navigation.navigate('Main');
     },
-    onError: () => {
+    onError: (err: unknown) => {
       setSubmitting(false);
-      Alert.alert('Save failed', 'Could not save the signature. Please try again.');
+      const alreadyComplete = err instanceof AxiosError && err.response?.status === 409;
+      Alert.alert(
+        'Save failed',
+        alreadyComplete
+          ? 'This trip is already completed. Please check with your dispatcher.'
+          : 'Could not save the signature. Please try again.'
+      );
     },
   });
 
@@ -52,6 +55,9 @@ export function SignatureCapture({ route, navigation }: { route: any; navigation
 
   return (
     <SafeAreaView style={styles.container}>
+      <TouchableOpacity onPress={() => navigation.goBack()} disabled={submitting}>
+        <Text style={styles.back}>‹ Back</Text>
+      </TouchableOpacity>
       <Text style={styles.title}>Rider / attendant signature</Text>
       <Text style={styles.subtitle}>Required to complete the trip</Text>
 
@@ -92,6 +98,7 @@ export function SignatureCapture({ route, navigation }: { route: any; navigation
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff', padding: 16 },
+  back: { color: '#2563eb', fontSize: 16, fontWeight: '600', marginBottom: 8 },
   title: { fontSize: 18, fontWeight: '700', color: '#111827' },
   subtitle: { fontSize: 13, color: '#6b7280', marginBottom: 12 },
   pad: { flex: 1, borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12, overflow: 'hidden' },
