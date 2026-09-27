@@ -15,6 +15,9 @@ import { requiredKeys } from '../services/importEngine/canonical';
 const router = Router();
 router.use(authenticate);
 
+// Where signature PNGs are written (mirrors otp.ts fallback-photo dir convention).
+const UPLOAD_DIR = process.env.UPLOAD_DIR || '/app/uploads/trip-events';
+
 // ─── GET /api/trips ──────────────────────────────────────────────────────────
 router.get('/',
   qv('status').optional().isString(),
@@ -370,8 +373,8 @@ router.patch('/:id/status',
       // Signature gate: cannot complete without a captured signature.
       if (status === 'completed') {
         const sig = await queryOne<{ id: number }>(
-          `SELECT id FROM trip_events WHERE trip_id = $1 AND event_type = 'signature' LIMIT 1`,
-          [tripId]
+          `SELECT id FROM trip_events WHERE trip_id = $1 AND org_id = $2 AND event_type = 'signature' LIMIT 1`,
+          [tripId, req.user!.orgId]
         );
         if (!sig) {
           return next(new AppError('A signature is required before completing this trip', 409));
@@ -406,8 +409,6 @@ router.patch('/:id/status',
 
 // ─── POST /api/trips/:id/signature ───────────────────────────────────────────
 // Driver captures rider/attendant signature at dropoff (required to complete).
-const UPLOAD_DIR = process.env.UPLOAD_DIR || '/app/uploads/trip-events';
-
 router.post('/:id/signature',
   param('id').isInt(),
   body('imageBase64').isString().notEmpty(),
@@ -434,15 +435,23 @@ router.post('/:id/signature',
 
       const b64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
       const filename = `sig-${tripId}-${Date.now()}.png`;
+      const filePath = path.join(UPLOAD_DIR, filename);
       await fs.promises.mkdir(UPLOAD_DIR, { recursive: true });
-      await fs.promises.writeFile(path.join(UPLOAD_DIR, filename), Buffer.from(b64, 'base64'));
+      await fs.promises.writeFile(filePath, Buffer.from(b64, 'base64'));
 
-      const event = await queryOne<{ id: number }>(
-        `INSERT INTO trip_events (org_id, trip_id, driver_id, event_type, file_filename, lat, lng)
-         VALUES ($1, $2, $3, 'signature', $4, $5, $6) RETURNING id`,
-        [req.user!.orgId, tripId, driver?.id ?? null, filename,
-         lat ?? null, lng ?? null]
-      );
+      let event: { id: number } | null;
+      try {
+        event = await queryOne<{ id: number }>(
+          `INSERT INTO trip_events (org_id, trip_id, driver_id, event_type, file_filename, lat, lng)
+           VALUES ($1, $2, $3, 'signature', $4, $5, $6) RETURNING id`,
+          [req.user!.orgId, tripId, driver?.id ?? null, filename,
+           lat ?? null, lng ?? null]
+        );
+      } catch (dbErr) {
+        // Don't leave an orphaned signature file if the DB write fails.
+        await fs.promises.unlink(filePath).catch(() => {});
+        throw dbErr;
+      }
 
       res.status(201).json({ id: event!.id, tripId, eventType: 'signature' });
     } catch (err) { next(err); }
