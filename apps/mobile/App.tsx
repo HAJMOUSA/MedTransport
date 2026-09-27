@@ -12,12 +12,14 @@ import { LoginScreen } from './src/screens/LoginScreen';
 import { TripList } from './src/screens/TripList';
 import { ActiveTrip } from './src/screens/ActiveTrip';
 import { OTPEntry } from './src/screens/OTPEntry';
+import { SignatureCapture } from './src/screens/SignatureCapture';
 
 export type RootStackParamList = {
   Login: undefined;
   Main: undefined;
   ActiveTrip: { tripId: number };
   OTPEntry: { tripId: number; eventType: 'pickup' | 'dropoff' };
+  SignatureCapture: { tripId: number };
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -66,6 +68,11 @@ function RootNavigator() {
             <Stack.Screen
               name="OTPEntry"
               component={OTPEntry}
+              options={{ presentation: 'modal' }}
+            />
+            <Stack.Screen
+              name="SignatureCapture"
+              component={SignatureCapture}
               options={{ presentation: 'modal' }}
             />
           </>
