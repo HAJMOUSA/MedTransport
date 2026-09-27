@@ -63,9 +63,13 @@ CREATE INDEX idx_trip_events_org ON trip_events(org_id);
 - `POST /api/trips/:id/no-show` — body `{ reason_code, note?, ... }`, optional photo. In **one transaction**: insert `no_show` event + set trip status `no_show`. Broadcast `trip:status-changed`.
 - `POST /api/trips/:id/cancellation` — body `{ reason_code, note? }`. In one transaction: insert `cancellation` event + set status `cancelled`. Broadcast.
 
-### Signature gate (server-authoritative)
+### Signature gate (server-authoritative) + centralizing completion
 
 `PATCH /api/trips/:id/status` is modified: a transition to `completed` is rejected with **409** and a clear message unless a `signature` `trip_event` exists for that trip. The rule lives on the server, not just the UI.
+
+**Important reconciliation:** today the dropoff OTP paths — `POST /api/otp/:id/verify` (eventType `dropoff`) and `POST /api/otp/:id/fallback` (dropoff) — set trip status directly to `completed` via a raw `UPDATE`, bypassing `PATCH /:id/status`. A gate on the status endpoint alone would be silently bypassed. Therefore completion is centralized: **dropoff** OTP verify/fallback no longer auto-complete — they record verification and leave status at `arrived_dropoff`. The only path to `completed` becomes `PATCH /:id/status`, where the gate is enforced. **Pickup** OTP verify/fallback are unchanged (still advance to `picked_up`).
+
+The gate applies to all roles (driver, dispatcher, admin). A dispatcher/admin manual-complete override is explicitly out of scope for this iteration.
 
 ### Reason codes (shared constant)
 
@@ -90,11 +94,11 @@ Add to `RootStackParamList` and register as modal screens:
   - Android: `google.navigation:q=lat,lng` → fallback `geo:`/`https://www.google.com/maps/dir/?api=1&destination=…`
   - Prefer coordinates; else URL-encoded address. Use `Linking.canOpenURL`; final fallback is the always-openable `https://` Google Maps URL.
 - "No-show / Cancel" action → routes to `TripException`.
-- `arrived_dropoff → completed`: after the existing OTP step, route to `SignatureCapture` before status flips to `completed`.
+- Dropoff completion flow: at `arrived_dropoff`, the button still routes to `OTPEntry` (dropoff). On successful dropoff OTP verify/fallback, `OTPEntry` now navigates (replace) to `SignatureCapture` instead of going back — since dropoff OTP no longer completes the trip. `SignatureCapture` performs the actual completion.
 
 **`SignatureCapture.tsx` (new)**
 - Full-screen signing pad via `react-native-signature-canvas` (WebView-backed, Expo-compatible). "Clear" + "Confirm".
-- On confirm: export PNG (base64) → upload via `POST /:id/signature` (multipart) → on 2xx, PATCH status to `completed` → pop to TripList.
+- On confirm: export PNG (base64 data URL) → write to a temp file with `expo-file-system` → upload via `POST /:id/signature` as multipart (matching the existing OTP photo-upload pattern) → on 2xx, `PATCH /:id/status` to `completed` (gate now passes) → navigate to `Main`.
 - Shows rider name + "Rider/attendant signature" caption.
 
 **`TripException.tsx` (new)**
@@ -106,7 +110,7 @@ Add to `RootStackParamList` and register as modal screens:
 - Socket.io already propagates status to dispatchers — no new socket code.
 
 ### Dependencies / permissions
-- Add `react-native-signature-canvas` (+ `react-native-webview` peer, Expo-managed).
+- Add `react-native-signature-canvas` (+ `react-native-webview` peer, Expo-managed) and `expo-file-system`.
 - No new native permissions (signature pad is JS/WebView; navigation is a URL open; camera already declared).
 
 ## Error handling
