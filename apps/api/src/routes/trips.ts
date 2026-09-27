@@ -1,5 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, param, query as qv, validationResult } from 'express-validator';
+import fs from 'fs';
+import path from 'path';
 import type { CanonicalTrip } from '@midtransport/shared';
 import { query, queryOne } from '../db/pool';
 import { authenticate, requireRole } from '../middleware/auth';
@@ -365,6 +367,17 @@ router.patch('/:id/status',
       const { status } = req.body as { status: string };
       const tripId = parseInt(req.params.id, 10);
 
+      // Signature gate: cannot complete without a captured signature.
+      if (status === 'completed') {
+        const sig = await queryOne<{ id: number }>(
+          `SELECT id FROM trip_events WHERE trip_id = $1 AND event_type = 'signature' LIMIT 1`,
+          [tripId]
+        );
+        if (!sig) {
+          return next(new AppError('A signature is required before completing this trip', 409));
+        }
+      }
+
       // Set actual timestamps based on status
       const timestampUpdates: string[] = [];
       if (status === 'picked_up') timestampUpdates.push('actual_pickup_at = NOW()');
@@ -387,6 +400,51 @@ router.patch('/:id/status',
       });
 
       res.json(trip);
+    } catch (err) { next(err); }
+  }
+);
+
+// ─── POST /api/trips/:id/signature ───────────────────────────────────────────
+// Driver captures rider/attendant signature at dropoff (required to complete).
+const UPLOAD_DIR = process.env.UPLOAD_DIR || '/app/uploads/trip-events';
+
+router.post('/:id/signature',
+  param('id').isInt(),
+  body('imageBase64').isString().notEmpty(),
+  body('lat').optional().isFloat(),
+  body('lng').optional().isFloat(),
+  async (req: Request, res: Response, next: NextFunction) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return next(new AppError('Signature image is required', 400));
+
+    try {
+      const tripId = parseInt(req.params.id, 10);
+      const { imageBase64, lat, lng } = req.body as {
+        imageBase64: string; lat?: number; lng?: number;
+      };
+
+      const driver = await queryOne<{ id: number }>(
+        'SELECT id FROM drivers WHERE user_id = $1', [req.user!.userId]
+      );
+
+      const trip = await queryOne<{ id: number }>(
+        'SELECT id FROM trips WHERE id = $1 AND org_id = $2', [tripId, req.user!.orgId]
+      );
+      if (!trip) return next(new AppError('Trip not found', 404));
+
+      const b64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+      const filename = `sig-${tripId}-${Date.now()}.png`;
+      await fs.promises.mkdir(UPLOAD_DIR, { recursive: true });
+      await fs.promises.writeFile(path.join(UPLOAD_DIR, filename), Buffer.from(b64, 'base64'));
+
+      const event = await queryOne<{ id: number }>(
+        `INSERT INTO trip_events (org_id, trip_id, driver_id, event_type, file_filename, lat, lng)
+         VALUES ($1, $2, $3, 'signature', $4, $5, $6) RETURNING id`,
+        [req.user!.orgId, tripId, driver?.id ?? null, filename,
+         lat ?? null, lng ?? null]
+      );
+
+      res.status(201).json({ id: event!.id, tripId, eventType: 'signature' });
     } catch (err) { next(err); }
   }
 );
