@@ -165,7 +165,7 @@ export function ActiveTrip({ route, navigation }: { route: any; navigation: any 
   }
 
   const action = NEXT_STATUS[trip.status];
-  const isDone = trip.status === 'completed' || trip.status === 'cancelled';
+  const isDone = ['completed', 'cancelled', 'no_show'].includes(trip.status);
   const scheduledTime = trip.scheduled_pickup_at
     ? new Date(trip.scheduled_pickup_at).toLocaleTimeString([], {
         hour: '2-digit',
