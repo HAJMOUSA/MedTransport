@@ -50,7 +50,6 @@
           "locationAlwaysAndWhenInUsePermission": "MidTransport needs location access to track your trips."
         }
       ],
-      "expo-router",
       "expo-secure-store"
     ]
   }

@@ -47,3 +47,9 @@ docs/*.csv
 # Local pnpm shim (machine npm is broken; local-only tooling)
 pnpm-workspace.yaml
 pnpm-lock.yaml
+
+# Expo prebuild output (regenerate with `expo prebuild`) + build artifacts
+apps/mobile/android/
+apps/mobile/ios/
+apps/mobile/expo-bare-sdk51.tgz
+apps/mobile/assets/
