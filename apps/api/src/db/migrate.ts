@@ -184,6 +184,30 @@ async function migrate() {
     );
     logger.info('Trip import schema applied');
 
+    // Trip events (signature / proof / no-show / cancellation audit log)
+    await db.query(`
+      DO $$ BEGIN
+        CREATE TYPE trip_event_type AS ENUM ('signature', 'proof_photo', 'no_show', 'cancellation');
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+      CREATE TABLE IF NOT EXISTS trip_events (
+        id            SERIAL PRIMARY KEY,
+        org_id        INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        trip_id       INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+        driver_id     INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+        event_type    trip_event_type NOT NULL,
+        reason_code   VARCHAR(40),
+        note          TEXT,
+        file_filename VARCHAR(255),
+        lat           DECIMAL(10, 8),
+        lng           DECIMAL(11, 8),
+        created_at    TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_trip_events_trip ON trip_events(trip_id);
+      CREATE INDEX IF NOT EXISTS idx_trip_events_org ON trip_events(org_id, created_at DESC);
+    `);
+    logger.info('Trip events migration applied');
+
     logger.info('Migration completed successfully');
   } catch (err) {
     logger.error('Migration failed', { error: (err as Error).message });
