@@ -78,6 +78,25 @@ export function LiveMap({ initialDrivers = [], trips = [] }: LiveMapProps) {
   const [selectedDriver, setSelectedDriver] = useState<DriverPosition | null>(null);
   const driverNamesRef = useRef<Map<number, string>>(new Map());
 
+  // Merge in drivers fetched from the REST snapshot (on-shift drivers that may
+  // not have emitted a live position since the map opened). Refetched on an
+  // interval by the parent, so this runs whenever the snapshot changes.
+  useEffect(() => {
+    if (!initialDrivers.length) return;
+    setDrivers(prev => {
+      const updated = new Map(prev);
+      for (const d of initialDrivers) {
+        if (d.driverName) driverNamesRef.current.set(d.driverId, d.driverName);
+        const existing = updated.get(d.driverId);
+        // Don't clobber a fresher live-socket position with an older snapshot.
+        if (!existing || new Date(d.timestamp) >= new Date(existing.timestamp)) {
+          updated.set(d.driverId, d);
+        }
+      }
+      return updated;
+    });
+  }, [initialDrivers]);
+
   // Listen for real-time driver position updates via Socket.io
   useEffect(() => {
     if (!socket) return;

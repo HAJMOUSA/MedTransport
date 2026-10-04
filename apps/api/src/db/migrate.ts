@@ -208,6 +208,27 @@ async function migrate() {
     `);
     logger.info('Trip events migration applied');
 
+    // ── Backfill columns/enum values the analytics queries depend on ─────────
+    // These exist in schema.sql but databases first initialized from an older
+    // schema never received them (migrate.ts previously only added a fixed set of
+    // incremental columns). A drifted DB makes GET /api/reports/summary throw and
+    // the dashboard KPIs read 0. All statements below are idempotent.
+    await db.query(`
+      ALTER TABLE trips
+        ADD COLUMN IF NOT EXISTS actual_pickup_at  TIMESTAMP WITH TIME ZONE,
+        ADD COLUMN IF NOT EXISTS actual_dropoff_at TIMESTAMP WITH TIME ZONE,
+        ADD COLUMN IF NOT EXISTS distance_miles    DECIMAL(8, 2);
+    `);
+    // otp_status may predate the 'fallback_photo' value. ADD VALUE IF NOT EXISTS
+    // cannot run inside a transaction block, so isolate it and swallow the
+    // "type does not exist" case on very old databases.
+    try {
+      await db.query(`ALTER TYPE otp_status ADD VALUE IF NOT EXISTS 'fallback_photo'`);
+    } catch (err) {
+      logger.warn('otp_status enum backfill skipped', { error: (err as Error).message });
+    }
+    logger.info('Analytics column/enum backfill applied');
+
     logger.info('Migration completed successfully');
   } catch (err) {
     logger.error('Migration failed', { error: (err as Error).message });

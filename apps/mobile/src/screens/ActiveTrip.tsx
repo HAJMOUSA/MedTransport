@@ -75,12 +75,17 @@ export function ActiveTrip({ route, navigation }: { route: any; navigation: any 
       }
       setLocationAllowed(true);
 
-      // Subscribe to location updates
+      // Subscribe to location updates.
+      // distanceInterval MUST be 0: with a non-zero value the OS only emits when
+      // the device physically moves that many metres, so a stopped vehicle (red
+      // light, pickup wait, dispatcher watching an idle driver) would freeze on
+      // the map and its last-seen time would go stale. 0 = purely time-driven, so
+      // we send a heartbeat every GPS_INTERVAL_MS even while stationary.
       locationSub.current = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.High,
           timeInterval: GPS_INTERVAL_MS,
-          distanceInterval: 20, // meters
+          distanceInterval: 0, // metres — 0 = emit on the time interval regardless of movement
         },
         (loc) => {
           const socket = socketRef.current;

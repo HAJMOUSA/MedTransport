@@ -18,6 +18,15 @@ export function Trips() {
     refetchInterval: 30_000,
   });
 
+  // Seed the map with drivers already on shift (live socket events only cover
+  // drivers that emit a position AFTER the map opens).
+  const { data: liveDrivers } = useQuery({
+    queryKey: ['drivers-live'],
+    queryFn: () => api.get('/api/tracking/drivers/live').then(r => r.data),
+    enabled: view === 'map',
+    refetchInterval: 15_000,
+  });
+
   return (
     <div className="flex flex-col h-full">
       {/* Sub-nav */}
@@ -48,7 +57,7 @@ export function Trips() {
       <div className="flex-1 overflow-hidden">
         {view === 'board'
           ? <TripBoard />
-          : <LiveMap trips={tripsData?.data ?? []} />
+          : <LiveMap trips={tripsData?.data ?? []} initialDrivers={liveDrivers ?? []} />
         }
       </div>
     </div>
