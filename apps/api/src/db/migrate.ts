@@ -103,7 +103,8 @@ async function migrate() {
         ADD COLUMN IF NOT EXISTS trip_type VARCHAR(50),
         ADD COLUMN IF NOT EXISTS source_vendor_profile_id INTEGER,
         ADD COLUMN IF NOT EXISTS import_job_id INTEGER,
-        ADD COLUMN IF NOT EXISTS will_call BOOLEAN NOT NULL DEFAULT FALSE;
+        ADD COLUMN IF NOT EXISTS will_call BOOLEAN NOT NULL DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS requested_vehicle_type VARCHAR(100);
 
       -- Will-call trips have no scheduled pickup time (idempotent)
       ALTER TABLE trips ALTER COLUMN scheduled_pickup_at DROP NOT NULL;

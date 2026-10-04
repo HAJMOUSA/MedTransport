@@ -23,6 +23,7 @@ export interface CanonicalTrip {
   additionalPassengers: number;
   assistanceNeeds: string | null;
   tripType: string | null;
+  requestedVehicleType: string | null; // free text: vendor-requested vehicle/space type
   status: string | null;             // maps onto trip_status enum subset
   distanceMiles: number | null;
   notes: string | null;

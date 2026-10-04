@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { CANONICAL_FIELDS, isValidMappingTarget, requiredKeys } from '../../src/services/importEngine/canonical';
 
 describe('canonical registry', () => {
-  it('has 19 unique fields with required flags', () => {
-    expect(CANONICAL_FIELDS).toHaveLength(19);
-    expect(new Set(CANONICAL_FIELDS.map(f => f.key)).size).toBe(19);
+  it('has 20 unique fields with required flags', () => {
+    expect(CANONICAL_FIELDS).toHaveLength(20);
+    expect(new Set(CANONICAL_FIELDS.map(f => f.key)).size).toBe(20);
     const required = CANONICAL_FIELDS.filter(f => f.required).map(f => f.key);
     expect(required).toEqual(expect.arrayContaining([
       'external_trip_id','pickup_at','passenger_first_name','passenger_last_name',

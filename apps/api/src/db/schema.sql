@@ -332,7 +332,8 @@ ALTER TABLE trips
   ADD COLUMN IF NOT EXISTS assistance_needs TEXT,
   ADD COLUMN IF NOT EXISTS trip_type VARCHAR(50),
   ADD COLUMN IF NOT EXISTS source_vendor_profile_id INTEGER,
-  ADD COLUMN IF NOT EXISTS import_job_id INTEGER;
+  ADD COLUMN IF NOT EXISTS import_job_id INTEGER,
+  ADD COLUMN IF NOT EXISTS requested_vehicle_type VARCHAR(100);
 
 CREATE TABLE IF NOT EXISTS vendor_profiles (
   id SERIAL PRIMARY KEY,

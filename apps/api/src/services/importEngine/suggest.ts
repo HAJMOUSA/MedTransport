@@ -1,10 +1,12 @@
 import { CANONICAL_FIELDS, isValidMappingTarget } from './canonical';
 
-// Normalize a header/alias for comparison: NFKC, lowercase, non-alphanumerics
-// to single spaces, collapse, trim.  "PU  City!" -> "pu city", "D.O.B" -> "d o b".
+// Normalize a header/alias for comparison: NFKC, drop apostrophes (so "Member's"
+// becomes "members" rather than "member s"), lowercase, non-alphanumerics to
+// single spaces, collapse, trim.  "PU  City!" -> "pu city", "D.O.B" -> "d o b".
 function norm(s: string): string {
   return s
     .normalize('NFKC')
+    .replace(/['’]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/ {2,}/g, ' ')
@@ -25,6 +27,56 @@ function sameTokenSet(a: string[], b: string[]): boolean {
   return true;
 }
 
+// Bounded Levenshtein for single-token typo tolerance.
+function lev(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  if (Math.abs(m - n) > 1) return 2; // we only care about <= 1
+  const prev = new Array(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    let diag = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = prev[j];
+      prev[j] = Math.min(
+        prev[j] + 1,
+        prev[j - 1] + 1,
+        diag + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+      diag = tmp;
+    }
+  }
+  return prev[n];
+}
+
+// A synonym token "matches" a header token if equal, or (for tokens >= 4 chars)
+// within one edit — typo tolerance without over-matching short tokens.
+function tokenMatches(syn: string, hdr: string[]): boolean {
+  if (hdr.includes(syn)) return true;
+  if (syn.length >= 4) return hdr.some(h => h.length >= 4 && lev(syn, h) <= 1);
+  return false;
+}
+
+// Every token of the synonym appears (fuzzily) in the header → synonym ⊆ header.
+function synonymSubset(syn: string[], hdr: string[]): boolean {
+  return syn.length > 0 && syn.every(s => tokenMatches(s, hdr));
+}
+
+// Do the synonym tokens appear as a contiguous, in-order run within the header?
+// "phone number" is contiguous in "members phone number"; "member number" is not.
+// A strong tie-breaker that prevents scattered-token false matches.
+function isContiguous(syn: string[], hdr: string[]): boolean {
+  if (syn.length === 0 || syn.length > hdr.length) return false;
+  for (let start = 0; start + syn.length <= hdr.length; start++) {
+    let ok = true;
+    for (let k = 0; k < syn.length; k++) {
+      if (!tokenMatches(syn[k], [hdr[start + k]])) { ok = false; break; }
+    }
+    if (ok) return true;
+  }
+  return false;
+}
+
 // Curated synonyms per canonical key. Address fields are handled separately
 // (sub-parts), so they are intentionally absent here. 'state' is deliberately
 // NOT a status synonym — a bare "State" column is an ambiguous address part.
@@ -36,7 +88,7 @@ const SYNONYMS: Record<string, string[]> = {
   passenger_first_name: ['first name', 'fname', 'first', 'patient first name', 'member first name', 'rider first name', 'passenger first'],
   passenger_last_name: ['last name', 'lname', 'last', 'surname', 'patient last name', 'member last name', 'rider last name', 'passenger last'],
   date_of_birth: ['dob', 'd o b', 'birth date', 'birthdate', 'date of birth'],
-  medical_id: ['member id', 'medicaid id', 'mrn', 'medical record', 'medical record number', 'insurance id', 'patient id', 'medical id', 'member number'],
+  medical_id: ['member id', 'medicaid id', 'medicaid number', 'medicaid no', 'mrn', 'medical record', 'medical record number', 'insurance id', 'patient id', 'medical id', 'member number'],
   primary_phone: ['phone', 'phone number', 'primary phone', 'home phone', 'tel', 'telephone', 'mobile', 'cell', 'cell phone', 'contact number', 'contact phone'],
   alternate_phone: ['alt phone', 'alternate phone', 'secondary phone', 'phone 2', 'other phone', 'emergency phone'],
   level_of_service: ['los', 'level of service', 'service level', 'mode', 'space type', 'transport type'],
@@ -44,13 +96,14 @@ const SYNONYMS: Record<string, string[]> = {
   assistance_needs: ['assistance', 'assistance needs', 'special needs', 'accommodations', 'mobility needs'],
   trip_type: ['trip type', 'trip leg', 'direction', 'trip kind', 'leg type'],
   status: ['status', 'trip status'],
-  distance_miles: ['distance', 'miles', 'mileage', 'trip miles', 'distance miles'],
+  distance_miles: ['distance', 'miles', 'mileage', 'trip miles', 'trip mileage', 'distance miles'],
   notes: ['notes', 'comments', 'remarks', 'special instructions', 'driver notes', 'comment'],
+  requested_vehicle_type: ['passenger type', 'vehicle type', 'mobility type', 'requested vehicle', 'requested vehicle type', 'space required'],
 };
 
 function detectLocation(n: string): 'pickup' | 'dropoff' | null {
   const pickup = /\b(pickup|pick up|pu|origin|from)\b/.test(n);
-  const dropoff = /\b(dropoff|drop off|do|dest|destination|to)\b/.test(n);
+  const dropoff = /\b(dropoff|drop off|drop|do|dest|destination|to|delivery|deliver)\b/.test(n);
   if (pickup === dropoff) return null; // neither, or ambiguous both
   return pickup ? 'pickup' : 'dropoff';
 }
@@ -63,8 +116,9 @@ function detectAddressPart(n: string): 'street' | 'city' | 'state' | 'zip' | nul
   return null;
 }
 
-// Try to match one header to a canonical target. `isTaken` enforces one-to-one.
-function matchHeader(header: string, isTaken: (target: string) => boolean): string | null {
+// Strict match: exact / full-token-set equality + address/datetime sub-parts.
+// `isTaken` enforces one-to-one.
+function matchHeaderStrict(header: string, isTaken: (target: string) => boolean): string | null {
   const n = norm(header);
   const t = tokens(header);
   const loc = detectLocation(n);
@@ -85,6 +139,7 @@ function matchHeader(header: string, isTaken: (target: string) => boolean): stri
     let base: 'appointment_at' | 'pickup_at' | null = null;
     if (/\b(appointment|appt)\b/.test(n)) base = 'appointment_at';
     else if (loc === 'pickup' || /\b(pickup|pick up|pu)\b/.test(n)) base = 'pickup_at';
+    else if (wantsTime && !wantsDate) base = 'appointment_at'; // bare "Time" → appointment time (pickup falls back to appointment downstream)
     if (base) {
       if (wantsDate && !wantsTime && !isTaken(`${base}.date`)) return `${base}.date`;
       if (wantsTime && !wantsDate && !isTaken(`${base}.time`)) return `${base}.time`;
@@ -107,21 +162,92 @@ function matchHeader(header: string, isTaken: (target: string) => boolean): stri
   return null;
 }
 
+interface FuzzyCandidate { field: string; matched: number; contig: number; extra: number; }
+
+// Rank: more matched tokens, then contiguous over scattered, then fewest extras.
+function better(a: FuzzyCandidate, b: FuzzyCandidate | null): boolean {
+  if (!b) return true;
+  if (a.matched !== b.matched) return a.matched > b.matched;
+  if (a.contig !== b.contig) return a.contig > b.contig;
+  return a.extra < b.extra;
+}
+
+// Best fuzzy (subset/typo) field for a header, or null. Headers that carry a
+// pickup/dropoff location are intentionally excluded here: their address/datetime
+// parts are handled by the strict pass, and a located column like
+// "Delivery Phone Number" must NOT grab the passenger-level primary_phone.
+function fuzzyCandidate(header: string): FuzzyCandidate | null {
+  const n = norm(header);
+  if (detectLocation(n)) return null;
+  const t = tokens(header);
+
+  let best: FuzzyCandidate | null = null;
+  for (const f of CANONICAL_FIELDS) {
+    if (f.type === 'address' || f.type === 'datetime') continue; // sub-part mapped only
+    const aliases = [f.key.replace(/_/g, ' '), f.label, ...(SYNONYMS[f.key] ?? [])];
+    let fieldBest: FuzzyCandidate | null = null;
+    for (const alias of aliases) {
+      const at = tokens(alias);
+      if (at.length < 2) continue; // single generic tokens are left to the strict pass
+      if (synonymSubset(at, t)) {
+        const cand: FuzzyCandidate = {
+          field: f.key,
+          matched: at.length,
+          contig: isContiguous(at, t) ? 1 : 0,
+          extra: Math.max(0, t.length - at.length),
+        };
+        if (better(cand, fieldBest)) fieldBest = cand;
+      }
+    }
+    if (fieldBest && better(fieldBest, best)) best = fieldBest;
+  }
+  return best;
+}
+
 /**
- * Suggest a canonical mapping target for each source header. Confident matches
- * only (exact or full-token-set equality); ambiguous/unknown headers are omitted.
- * Each canonical target is suggested at most once (first header wins).
+ * Suggest a canonical mapping target for each source header.
+ *
+ * Two passes: a confident strict pass (exact / full-token-set equality, address
+ * and datetime sub-parts) runs first in header order (first header wins a target).
+ * Then an aggressive fuzzy pass assigns the remaining headers by best score —
+ * a field's synonym matches when all its tokens appear in the header (allowing a
+ * one-character typo on tokens ≥4 chars), so noisy real-world headers like
+ * "Member's First Name" or "Number of Additional Passengers" still map. Each
+ * canonical target is suggested at most once.
  */
 export function suggestMapping(headers: string[]): Record<string, string> {
   const result: Record<string, string> = {};
   const taken = new Set<string>();
+
+  // Pass A — strict, order-sensitive, first header wins.
   for (const h of headers) {
     if (h in result) continue; // ignore duplicate header strings
-    const target = matchHeader(h, (tgt) => taken.has(tgt));
+    const target = matchHeaderStrict(h, (tgt) => taken.has(tgt));
     if (target) {
       result[h] = target;
       taken.add(target);
     }
   }
+
+  // Pass B — fuzzy, globally assigned by best score so the strongest header wins
+  // each remaining target (not merely the first one encountered).
+  const cands = headers
+    .map((h, idx) => ({ h, idx, cand: h in result ? null : fuzzyCandidate(h) }))
+    .filter((c): c is { h: string; idx: number; cand: FuzzyCandidate } => c.cand !== null)
+    .sort((a, b) =>
+      b.cand.matched - a.cand.matched ||
+      b.cand.contig - a.cand.contig ||
+      a.cand.extra - b.cand.extra ||
+      a.idx - b.idx);
+
+  const usedHeaders = new Set<string>();
+  for (const { h, cand } of cands) {
+    if (usedHeaders.has(h) || h in result) continue;
+    if (taken.has(cand.field)) continue;
+    result[h] = cand.field;
+    taken.add(cand.field);
+    usedHeaders.add(h);
+  }
+
   return result;
 }

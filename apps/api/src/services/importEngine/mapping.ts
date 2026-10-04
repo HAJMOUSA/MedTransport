@@ -19,6 +19,7 @@ function emptyTrip(): CanonicalTrip {
     medicalId: null, primaryPhone: null, alternatePhone: null,
     pickupAddress: null, dropoffAddress: null, levelOfService: null,
     additionalPassengers: 0, assistanceNeeds: null, tripType: null,
+    requestedVehicleType: null,
     status: null, distanceMiles: null, notes: null,
   };
 }
@@ -30,6 +31,7 @@ const CAMEL: Record<string, keyof CanonicalTrip> = {
   alternate_phone: 'alternatePhone', pickup_address: 'pickupAddress', dropoff_address: 'dropoffAddress',
   level_of_service: 'levelOfService', additional_passengers: 'additionalPassengers',
   assistance_needs: 'assistanceNeeds', trip_type: 'tripType', status: 'status',
+  requested_vehicle_type: 'requestedVehicleType',
   distance_miles: 'distanceMiles', notes: 'notes',
 };
 

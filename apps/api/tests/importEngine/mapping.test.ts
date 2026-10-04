@@ -61,6 +61,17 @@ describe('applyMapping', () => {
     expect(notices.some(n => /whitespace/i.test(n))).toBe(true);
   });
 
+  it('maps requested_vehicle_type as free text', () => {
+    const profile: VendorProfileConfig = {
+      ...PROFILE,
+      columnMap: { ...PROFILE.columnMap, 'Passenger Type': 'requested_vehicle_type' },
+    };
+    const row = { ...ROW, 'Passenger Type': 'Manual Wheelchair - cannot transfer' };
+    const parsed2 = { headers: Object.keys(row), rows: [row], rowNumbers: [2] };
+    const { trips } = applyMapping(parsed2, profile, 'America/New_York');
+    expect(trips[0].requestedVehicleType).toBe('Manual Wheelchair - cannot transfer');
+  });
+
   it('flags unparseable dates with row context', () => {
     const bad = { ...ROW, 'Appointment Date': 'garbage' };
     const { trips, issues } = applyMapping({ ...parsed, rows: [bad] }, PROFILE, 'America/New_York');

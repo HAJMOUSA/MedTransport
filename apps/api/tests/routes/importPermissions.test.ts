@@ -47,6 +47,6 @@ describe('import route permissions', () => {
       .set('Authorization', `Bearer ${token('dispatcher')}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
-    expect(res.body).toHaveLength(19);
+    expect(res.body).toHaveLength(20);
   });
 });
