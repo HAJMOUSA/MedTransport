@@ -12,6 +12,7 @@ import { detectProfile, ProfileCandidate } from '../services/importEngine/profil
 import { executeImport, loadProfileConfig, runAnalysis } from '../services/importRunner';
 import { CANONICAL_FIELDS } from '../services/importEngine/canonical';
 import { suggestMapping } from '../services/importEngine/suggest';
+import { distinctSampleValues } from '../services/importEngine/samples';
 import { validateConfig } from './vendorProfiles';
 
 const router = Router();
@@ -105,6 +106,7 @@ router.post('/upload', upload.single('file'), async (req: Request, res: Response
       rowCount: parsed.rows.length,
       detectedProfile: detection,
       suggestedMap,
+      sampleValues: distinctSampleValues(parsed),
     });
   } catch (err) { next(err); }
 });

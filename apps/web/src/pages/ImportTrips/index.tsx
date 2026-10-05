@@ -15,7 +15,9 @@ function reducer(state: WizardState, action: WizardAction): WizardState {
 
 const initial: WizardState = {
   step: 1, upload: null, profileId: null, profileVersionId: null, inlineConfig: null,
-  mappingOverrides: {}, analysis: null,
+  mappingOverrides: {}, valueTranslations: {},
+  dateFormat: 'M/d/yyyy', timeFormat: 'h:mm a', timezone: 'America/New_York',
+  analysis: null,
   mode: 'valid_rows_only', duplicatePolicy: 'skip', jobId: null,
 };
 

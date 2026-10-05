@@ -31,7 +31,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     const rows = await query(
       `SELECT p.id, p.name, p.is_active, p.created_at,
               (SELECT MAX(v.version) FROM vendor_profile_versions v WHERE v.profile_id = p.id) AS "latestVersion"
-       FROM vendor_profiles p WHERE p.org_id = $1 ORDER BY p.name`,
+       FROM vendor_profiles p WHERE p.org_id = $1 AND p.is_active = true ORDER BY p.name`,
       [req.user!.orgId]
     );
     res.json(rows);
@@ -109,6 +109,49 @@ router.post('/:id/versions', requireRole('admin'),
         [profile.id, JSON.stringify(req.body.config), req.user!.userId]
       );
       res.status(201).json({ versionId: row!.id, version: row!.version });
+    } catch (err) { next(err); }
+  }
+);
+
+// ─── PATCH /api/import/profiles/:id (admin) — rename / (de)activate ───────────
+router.patch('/:id', requireRole('admin'),
+  body('name').optional().trim().isLength({ min: 1, max: 200 }),
+  body('isActive').optional().isBoolean(),
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!validationResult(req).isEmpty()) return next(new AppError('Invalid profile update', 400));
+    const { name, isActive } = req.body as { name?: string; isActive?: boolean };
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    if (name !== undefined) { vals.push(name); sets.push(`name = $${vals.length}`); }
+    if (isActive !== undefined) { vals.push(isActive); sets.push(`is_active = $${vals.length}`); }
+    if (sets.length === 0) return next(new AppError('Nothing to update', 400));
+    try {
+      vals.push(req.params.id, req.user!.orgId);
+      const row = await queryOne(
+        `UPDATE vendor_profiles SET ${sets.join(', ')}, updated_at = NOW()
+         WHERE id = $${vals.length - 1} AND org_id = $${vals.length}
+         RETURNING id, name, is_active`,
+        vals
+      );
+      if (!row) return next(new AppError('Profile not found', 404));
+      res.json(row);
+    } catch (err) { next(err); }
+  }
+);
+
+// ─── DELETE /api/import/profiles/:id (admin) — soft delete ────────────────────
+// Soft delete (is_active = false) so imported trips that reference the profile
+// via source_vendor_profile_id keep their lineage; it just disappears from the
+// profile list and auto-detection.
+router.delete('/:id', requireRole('admin'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const row = await queryOne(
+        'UPDATE vendor_profiles SET is_active = false, updated_at = NOW() WHERE id = $1 AND org_id = $2 RETURNING id',
+        [req.params.id, req.user!.orgId]
+      );
+      if (!row) return next(new AppError('Profile not found', 404));
+      res.status(204).end();
     } catch (err) { next(err); }
   }
 );
