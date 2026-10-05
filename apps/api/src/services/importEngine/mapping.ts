@@ -130,7 +130,11 @@ export function applyMapping(parsed: ParsedCsv, config: VendorProfileConfig, org
     for (const [key, parts] of Object.entries(dtParts)) {
       const prop = CAMEL[key] as keyof CanonicalTrip;
       const iso = parseDateTime(parts, { ...config, timezone: tz });
-      if (iso === null) {
+      // Will-call trips have no scheduled pickup time — vendors often put a
+      // sentinel like "Will Call" in the time column. Don't flag an unparseable
+      // pickup/appointment time as an error for them; just leave it null.
+      const suppressForWillCall = trip.willCall && (key === 'pickup_at' || key === 'appointment_at');
+      if (iso === null && !suppressForWillCall) {
         const badCode =
           !parts.dateTime && parts.time?.trim() && !isValidTime(parts.time, config.timeFormat, tz)
             ? 'E_TIME_PARSE'
