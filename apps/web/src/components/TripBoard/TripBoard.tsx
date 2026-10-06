@@ -27,6 +27,10 @@ export interface Trip {
   driver_id: number | null;
   pickup_address: string;
   dropoff_address: string;
+  pickup_lat?: number | string | null;
+  pickup_lng?: number | string | null;
+  dropoff_lat?: number | string | null;
+  dropoff_lng?: number | string | null;
   scheduled_pickup_at: string | null; // null when will_call
   actual_pickup_at: string | null;
   mobility_type: string;

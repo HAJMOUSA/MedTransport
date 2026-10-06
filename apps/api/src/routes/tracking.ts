@@ -78,7 +78,7 @@ router.get('/trips/:tripId/route',
   param('tripId').isInt(),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const locations = await query(
+      const locations = await query<{ lat: string; lng: string; speed_mph: string | null; heading_deg: number | null; recorded_at: Date }>(
         `SELECT dl.latitude as lat, dl.longitude as lng, dl.speed_mph, dl.heading_deg,
                 dl.recorded_at
          FROM driver_locations dl
@@ -87,7 +87,13 @@ router.get('/trips/:tripId/route',
          ORDER BY dl.recorded_at ASC`,
         [req.params.tripId, req.user!.orgId]
       );
-      res.json(locations);
+      res.json(locations.map(r => ({
+        lat: parseFloat(r.lat),
+        lng: parseFloat(r.lng),
+        speedMph: r.speed_mph ? parseFloat(r.speed_mph) : 0,
+        headingDeg: r.heading_deg ?? 0,
+        recordedAt: new Date(r.recorded_at).toISOString(),
+      })));
     } catch (err) { next(err); }
   }
 );
