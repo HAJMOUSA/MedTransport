@@ -44,7 +44,7 @@ const NEXT_STATUS: Record<string, { label: string; next: string; color: string }
   arrived_dropoff: { label: '✅ Complete — Enter OTP', next: 'completed',          color: '#f59e0b' },
 };
 
-const GPS_INTERVAL_MS = 10_000; // 10 seconds
+const GPS_INTERVAL_MS = 5_000; // 5 seconds — smoother real-time route trail on the dispatcher map
 
 export function ActiveTrip({ route, navigation }: { route: any; navigation: any }) {
   const { tripId } = route.params;

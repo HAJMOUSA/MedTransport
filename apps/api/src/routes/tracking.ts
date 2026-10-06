@@ -92,6 +92,39 @@ router.get('/trips/:tripId/route',
   }
 );
 
+// ─── GET /api/tracking/drivers/:driverId/path ─────────────────────────────────
+// Recent GPS breadcrumb points for one driver, ordered oldest→newest. Seeds the
+// live-map route polyline so an already-moving driver shows the trail so far;
+// live growth comes from driver:position socket events on top of this.
+router.get('/drivers/:driverId/path',
+  requireRole('admin', 'dispatcher'),
+  param('driverId').isInt(),
+  qv('minutes').optional().isInt({ min: 1, max: 1440 }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!validationResult(req).isEmpty()) return next(new AppError('Invalid parameters', 400));
+    try {
+      const minutes = Math.min(parseInt((req.query.minutes as string) || '240', 10), 1440);
+      const rows = await query<{ lat: string; lng: string; speed_mph: string | null; heading_deg: number | null; recorded_at: Date }>(
+        `SELECT dl.latitude AS lat, dl.longitude AS lng, dl.speed_mph, dl.heading_deg, dl.recorded_at
+         FROM driver_locations dl
+         JOIN drivers d ON d.id = dl.driver_id
+         WHERE dl.driver_id = $1 AND d.org_id = $2
+           AND dl.recorded_at >= NOW() - ($3 * INTERVAL '1 minute')
+         ORDER BY dl.recorded_at ASC
+         LIMIT 2000`,
+        [req.params.driverId, req.user!.orgId, minutes]
+      );
+      res.json(rows.map(r => ({
+        lat: parseFloat(r.lat),
+        lng: parseFloat(r.lng),
+        speedMph: r.speed_mph ? parseFloat(r.speed_mph) : 0,
+        headingDeg: r.heading_deg ?? 0,
+        recordedAt: new Date(r.recorded_at).toISOString(),
+      })));
+    } catch (err) { next(err); }
+  }
+);
+
 // ─── GET /api/tracking/drivers/:driverId/metrics ──────────────────────────────
 router.get('/drivers/:driverId/metrics',
   requireRole('admin', 'dispatcher'),
