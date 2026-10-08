@@ -18,7 +18,8 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "MidTransport uses your location to track active trips and detect arrivals.",
         "NSLocationAlwaysUsageDescription": "MidTransport uses background location to continue tracking during active trips.",
-        "NSCameraUsageDescription": "Camera is used as a fallback when a rider cannot receive an OTP."
+        "NSCameraUsageDescription": "Camera is used as a fallback when a rider cannot receive an OTP.",
+        "LSApplicationQueriesSchemes": ["comgooglemaps"]
       }
     },
     "android": {
@@ -49,7 +50,6 @@
           "locationAlwaysAndWhenInUsePermission": "MidTransport needs location access to track your trips."
         }
       ],
-      "expo-router",
       "expo-secure-store"
     ]
   }

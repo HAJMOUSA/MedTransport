@@ -103,7 +103,8 @@ async function migrate() {
         ADD COLUMN IF NOT EXISTS trip_type VARCHAR(50),
         ADD COLUMN IF NOT EXISTS source_vendor_profile_id INTEGER,
         ADD COLUMN IF NOT EXISTS import_job_id INTEGER,
-        ADD COLUMN IF NOT EXISTS will_call BOOLEAN NOT NULL DEFAULT FALSE;
+        ADD COLUMN IF NOT EXISTS will_call BOOLEAN NOT NULL DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS requested_vehicle_type VARCHAR(100);
 
       -- Will-call trips have no scheduled pickup time (idempotent)
       ALTER TABLE trips ALTER COLUMN scheduled_pickup_at DROP NOT NULL;
@@ -183,6 +184,51 @@ async function migrate() {
        WHERE NOT EXISTS (SELECT 1 FROM levels_of_service l WHERE l.org_id = o.id)`
     );
     logger.info('Trip import schema applied');
+
+    // Trip events (signature / proof / no-show / cancellation audit log)
+    await db.query(`
+      DO $$ BEGIN
+        CREATE TYPE trip_event_type AS ENUM ('signature', 'proof_photo', 'no_show', 'cancellation');
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+      CREATE TABLE IF NOT EXISTS trip_events (
+        id            SERIAL PRIMARY KEY,
+        org_id        INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        trip_id       INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+        driver_id     INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+        event_type    trip_event_type NOT NULL,
+        reason_code   VARCHAR(40),
+        note          TEXT,
+        file_filename VARCHAR(255),
+        lat           DECIMAL(10, 8),
+        lng           DECIMAL(11, 8),
+        created_at    TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_trip_events_trip ON trip_events(trip_id);
+      CREATE INDEX IF NOT EXISTS idx_trip_events_org ON trip_events(org_id, created_at DESC);
+    `);
+    logger.info('Trip events migration applied');
+
+    // ── Backfill columns/enum values the analytics queries depend on ─────────
+    // These exist in schema.sql but databases first initialized from an older
+    // schema never received them (migrate.ts previously only added a fixed set of
+    // incremental columns). A drifted DB makes GET /api/reports/summary throw and
+    // the dashboard KPIs read 0. All statements below are idempotent.
+    await db.query(`
+      ALTER TABLE trips
+        ADD COLUMN IF NOT EXISTS actual_pickup_at  TIMESTAMP WITH TIME ZONE,
+        ADD COLUMN IF NOT EXISTS actual_dropoff_at TIMESTAMP WITH TIME ZONE,
+        ADD COLUMN IF NOT EXISTS distance_miles    DECIMAL(8, 2);
+    `);
+    // otp_status may predate the 'fallback_photo' value. ADD VALUE IF NOT EXISTS
+    // cannot run inside a transaction block, so isolate it and swallow the
+    // "type does not exist" case on very old databases.
+    try {
+      await db.query(`ALTER TYPE otp_status ADD VALUE IF NOT EXISTS 'fallback_photo'`);
+    } catch (err) {
+      logger.warn('otp_status enum backfill skipped', { error: (err as Error).message });
+    }
+    logger.info('Analytics column/enum backfill applied');
 
     logger.info('Migration completed successfully');
   } catch (err) {

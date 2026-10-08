@@ -20,6 +20,7 @@ export const CANONICAL_FIELDS: CanonicalFieldDef[] = [
   { key: 'additional_passengers', label: 'Additional Passengers',  type: 'integer',   required: false, description: 'Non-negative integer, default 0' },
   { key: 'assistance_needs',      label: 'Assistance Needs',       type: 'text',      required: false, description: 'Free text' },
   { key: 'trip_type',             label: 'Trip Type',              type: 'controlled',required: true,  description: 'Translated to the org controlled list' },
+  { key: 'requested_vehicle_type',label: 'Requested Vehicle Type', type: 'text',      required: false, description: 'Vehicle / space type requested by the vendor, stored as free text (e.g. "Ambulatory", "Manual Wheelchair", "Scooter")' },
   { key: 'status',                label: 'Status',                 type: 'controlled',required: false, description: 'Recognized values only; unknown values flagged' },
   { key: 'distance_miles',        label: 'Distance (miles)',       type: 'decimal',   required: false, description: 'Non-negative; not an authoritative routing distance' },
   { key: 'notes',                 label: 'Notes',                  type: 'text',      required: false, description: 'Sanitized text; never parsed as phone/identifier' },

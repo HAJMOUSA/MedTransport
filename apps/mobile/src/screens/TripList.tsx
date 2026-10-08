@@ -67,7 +67,7 @@ export function TripList({ navigation }: { navigation: any }) {
 
   const { data: trips = [], isLoading, refetch, isRefetching } = useQuery<Trip[]>({
     queryKey: ['my-trips'],
-    queryFn: () => api.get('/api/trips').then(r => r.data),
+    queryFn: () => api.get('/api/trips').then(r => r.data.data ?? r.data),
   });
 
   // Listen for real-time trip assignments

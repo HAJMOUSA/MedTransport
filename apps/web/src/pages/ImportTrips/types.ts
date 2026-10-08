@@ -3,6 +3,7 @@ export interface UploadInfo {
   delimiter: string; headers: string[]; rowCount: number;
   detectedProfile: { profileId: number; versionId: number; name: string; confidence: number } | null;
   suggestedMap?: Record<string, string>;
+  sampleValues?: Record<string, string[]>; // distinct values per column, for the translation editor
 }
 export interface AnalysisResult {
   counts: { total: number; valid: number; warning: number; invalid: number; duplicates: number; newRiders: number; matchedRiders: number };
@@ -19,6 +20,11 @@ export interface WizardState {
   profileVersionId: number | null;  // vendor_profile_versions.id
   inlineConfig: Record<string, unknown> | null; // unsaved config built on the map step (profileless import)
   mappingOverrides: Record<string, string>;
+  // canonicalKey -> { sourceValue -> targetValue } (user-editable overrides)
+  valueTranslations: Record<string, Record<string, string>>;
+  dateFormat: string;
+  timeFormat: string;
+  timezone: string;
   analysis: AnalysisResult | null;
   mode: 'test' | 'all_or_nothing' | 'valid_rows_only';
   duplicatePolicy: 'skip' | 'reject' | 'update';

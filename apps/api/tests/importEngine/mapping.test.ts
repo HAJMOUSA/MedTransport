@@ -61,6 +61,25 @@ describe('applyMapping', () => {
     expect(notices.some(n => /whitespace/i.test(n))).toBe(true);
   });
 
+  it('does not flag an unparseable pickup/appointment time on will-call trips', () => {
+    const willCallRow = { ...ROW, 'Will Call Flag': 'Y', 'Time': 'Will Call' };
+    const { trips, issues } = applyMapping({ ...parsed, rows: [willCallRow] }, PROFILE, 'America/New_York');
+    expect(trips[0].willCall).toBe(true);
+    expect(trips[0].pickupAt).toBeNull();
+    expect(issues.some(i => i.code === 'E_TIME_PARSE' || i.code === 'E_DATE_PARSE')).toBe(false);
+  });
+
+  it('maps requested_vehicle_type as free text', () => {
+    const profile: VendorProfileConfig = {
+      ...PROFILE,
+      columnMap: { ...PROFILE.columnMap, 'Passenger Type': 'requested_vehicle_type' },
+    };
+    const row = { ...ROW, 'Passenger Type': 'Manual Wheelchair - cannot transfer' };
+    const parsed2 = { headers: Object.keys(row), rows: [row], rowNumbers: [2] };
+    const { trips } = applyMapping(parsed2, profile, 'America/New_York');
+    expect(trips[0].requestedVehicleType).toBe('Manual Wheelchair - cannot transfer');
+  });
+
   it('flags unparseable dates with row context', () => {
     const bad = { ...ROW, 'Appointment Date': 'garbage' };
     const { trips, issues } = applyMapping({ ...parsed, rows: [bad] }, PROFILE, 'America/New_York');

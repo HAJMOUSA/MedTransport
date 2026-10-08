@@ -1,5 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, param, query as qv, validationResult } from 'express-validator';
+import fs from 'fs';
+import path from 'path';
 import type { CanonicalTrip } from '@midtransport/shared';
 import { query, queryOne } from '../db/pool';
 import { authenticate, requireRole } from '../middleware/auth';
@@ -9,9 +11,13 @@ import { logger } from '../lib/logger';
 import { geocodeAddress } from '../lib/geocode';
 import { validateRows } from '../services/importEngine/validate';
 import { requiredKeys } from '../services/importEngine/canonical';
+import { NO_SHOW_REASON_CODES, CANCELLATION_REASON_CODES } from '../lib/reasonCodes';
 
 const router = Router();
 router.use(authenticate);
+
+// Where signature PNGs are written (mirrors otp.ts fallback-photo dir convention).
+const UPLOAD_DIR = process.env.UPLOAD_DIR || '/app/uploads/trip-events';
 
 // ─── GET /api/trips ──────────────────────────────────────────────────────────
 router.get('/',
@@ -365,6 +371,17 @@ router.patch('/:id/status',
       const { status } = req.body as { status: string };
       const tripId = parseInt(req.params.id, 10);
 
+      // Signature gate: cannot complete without a captured signature.
+      if (status === 'completed') {
+        const sig = await queryOne<{ id: number }>(
+          `SELECT id FROM trip_events WHERE trip_id = $1 AND org_id = $2 AND event_type = 'signature' LIMIT 1`,
+          [tripId, req.user!.orgId]
+        );
+        if (!sig) {
+          return next(new AppError('A signature is required before completing this trip', 409));
+        }
+      }
+
       // Set actual timestamps based on status
       const timestampUpdates: string[] = [];
       if (status === 'picked_up') timestampUpdates.push('actual_pickup_at = NOW()');
@@ -390,6 +407,129 @@ router.patch('/:id/status',
     } catch (err) { next(err); }
   }
 );
+
+// ─── POST /api/trips/:id/signature ───────────────────────────────────────────
+// Driver captures rider/attendant signature at dropoff (required to complete).
+// Unlike the OTP fallback photo (multipart/multer), the signature PNG arrives as
+// a base64 data URL in the JSON body — it's small (~30–50 KB) and this avoids RN
+// FormData file-uri pitfalls. Decoded and written to disk below.
+router.post('/:id/signature',
+  param('id').isInt(),
+  body('imageBase64').isString().notEmpty(),
+  body('lat').optional().isFloat(),
+  body('lng').optional().isFloat(),
+  async (req: Request, res: Response, next: NextFunction) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return next(new AppError('Signature image is required', 400));
+
+    try {
+      const tripId = parseInt(req.params.id, 10);
+      const { imageBase64, lat, lng } = req.body as {
+        imageBase64: string; lat?: number; lng?: number;
+      };
+
+      const driver = await queryOne<{ id: number }>(
+        'SELECT id FROM drivers WHERE user_id = $1', [req.user!.userId]
+      );
+
+      const trip = await queryOne<{ id: number }>(
+        'SELECT id FROM trips WHERE id = $1 AND org_id = $2', [tripId, req.user!.orgId]
+      );
+      if (!trip) return next(new AppError('Trip not found', 404));
+
+      const b64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+      const filename = `sig-${tripId}-${Date.now()}.png`;
+      const filePath = path.join(UPLOAD_DIR, filename);
+      await fs.promises.mkdir(UPLOAD_DIR, { recursive: true });
+      await fs.promises.writeFile(filePath, Buffer.from(b64, 'base64'));
+
+      let event: { id: number } | null;
+      try {
+        event = await queryOne<{ id: number }>(
+          `INSERT INTO trip_events (org_id, trip_id, driver_id, event_type, file_filename, lat, lng)
+           VALUES ($1, $2, $3, 'signature', $4, $5, $6) RETURNING id`,
+          [req.user!.orgId, tripId, driver?.id ?? null, filename,
+           lat ?? null, lng ?? null]
+        );
+      } catch (dbErr) {
+        // Don't leave an orphaned signature file if the DB write fails.
+        await fs.promises.unlink(filePath).catch(() => {});
+        throw dbErr;
+      }
+
+      res.status(201).json({ id: event!.id, tripId, eventType: 'signature' });
+    } catch (err) { next(err); }
+  }
+);
+
+// ─── POST /api/trips/:id/no-show ─────────────────────────────────────────────
+// Driver-initiated field action (no requireRole), consistent with PATCH /:id/status.
+router.post('/:id/no-show',
+  param('id').isInt(),
+  body('reasonCode').trim().isIn(NO_SHOW_REASON_CODES as unknown as string[]),
+  body('note').optional().trim().isLength({ max: 1000 }),
+  body('lat').optional().isFloat(),
+  body('lng').optional().isFloat(),
+  async (req: Request, res: Response, next: NextFunction) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return next(new AppError('Invalid no-show request', 400));
+    return recordException(req, res, next, 'no_show', 'no_show');
+  }
+);
+
+// ─── POST /api/trips/:id/cancellation ────────────────────────────────────────
+// Driver or dispatcher field action (no requireRole), consistent with PATCH /:id/status.
+router.post('/:id/cancellation',
+  param('id').isInt(),
+  body('reasonCode').trim().isIn(CANCELLATION_REASON_CODES as unknown as string[]),
+  body('note').optional().trim().isLength({ max: 1000 }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return next(new AppError('Invalid cancellation request', 400));
+    return recordException(req, res, next, 'cancellation', 'cancelled');
+  }
+);
+
+// Shared handler for no-show / cancellation events.
+async function recordException(
+  req: Request, res: Response, next: NextFunction,
+  eventType: 'no_show' | 'cancellation',
+  newStatus: 'no_show' | 'cancelled',
+) {
+  try {
+    const tripId = parseInt(req.params.id, 10);
+    const { reasonCode, note, lat, lng } = req.body as {
+      reasonCode: string; note?: string; lat?: number; lng?: number;
+    };
+
+    const driver = await queryOne<{ id: number }>(
+      'SELECT id FROM drivers WHERE user_id = $1', [req.user!.userId]
+    );
+
+    const trip = await queryOne<{ id: number }>(
+      'SELECT id FROM trips WHERE id = $1 AND org_id = $2', [tripId, req.user!.orgId]
+    );
+    if (!trip) return next(new AppError('Trip not found', 404));
+
+    await query(
+      `INSERT INTO trip_events (org_id, trip_id, driver_id, event_type, reason_code, note, lat, lng)
+       VALUES ($1, $2, $3, $4::trip_event_type, $5, $6, $7, $8)`,
+      [req.user!.orgId, tripId, driver?.id ?? null, eventType, reasonCode, note ?? null,
+       lat ?? null, lng ?? null]
+    );
+
+    await query(
+      `UPDATE trips SET status = $1::trip_status, updated_at = NOW() WHERE id = $2 AND org_id = $3`,
+      [newStatus, tripId, req.user!.orgId]
+    );
+
+    getIo().to(`org:${req.user!.orgId}:dispatchers`).emit('trip:status-changed', {
+      tripId, status: newStatus, timestamp: new Date().toISOString(),
+    });
+
+    res.json({ tripId, status: newStatus, eventType });
+  } catch (err) { next(err); }
+}
 
 // ─── PATCH /api/trips/:id/assign ─────────────────────────────────────────────
 router.patch('/:id/assign',

@@ -15,6 +15,7 @@ const STATUS_COLUMNS = [
   { key: 'arrived_pickup',    label: 'Arrived',      color: 'bg-yellow-100 text-yellow-700' },
   { key: 'picked_up',         label: 'Picked Up',    color: 'bg-orange-100 text-orange-700' },
   { key: 'en_route_dropoff',  label: 'To Dropoff',   color: 'bg-purple-100 text-purple-700' },
+  { key: 'arrived_dropoff',   label: 'At Dropoff',   color: 'bg-teal-100   text-teal-700' },
   { key: 'completed',         label: 'Completed',    color: 'bg-green-100  text-green-700' },
 ] as const;
 
@@ -27,6 +28,10 @@ export interface Trip {
   driver_id: number | null;
   pickup_address: string;
   dropoff_address: string;
+  pickup_lat?: number | string | null;
+  pickup_lng?: number | string | null;
+  dropoff_lat?: number | string | null;
+  dropoff_lng?: number | string | null;
   scheduled_pickup_at: string | null; // null when will_call
   actual_pickup_at: string | null;
   mobility_type: string;

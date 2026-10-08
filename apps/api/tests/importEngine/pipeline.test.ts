@@ -72,5 +72,5 @@ describe('engine purity', () => {
       expect(src, f).not.toMatch(/from '(express|pg|ioredis|\.\.\/\.\.\/db)/);
     }
   });
-  it('canonical registry has 19 fields', () => expect(CANONICAL_FIELDS).toHaveLength(19));
+  it('canonical registry has 20 fields', () => expect(CANONICAL_FIELDS).toHaveLength(20));
 });

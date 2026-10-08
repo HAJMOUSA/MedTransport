@@ -54,11 +54,15 @@ export function OTPEntry({ route, navigation }: OTPEntryProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trip', tripId] });
       queryClient.invalidateQueries({ queryKey: ['my-trips'] });
-      Alert.alert(
-        '✅ Verified!',
-        eventType === 'pickup' ? 'Pickup confirmed. Safe travels!' : 'Dropoff confirmed. Trip complete!',
-        [{ text: 'OK', onPress: () => navigation.goBack() }]
-      );
+      if (eventType === 'dropoff') {
+        navigation.replace('SignatureCapture', { tripId });
+      } else {
+        Alert.alert(
+          '✅ Verified!',
+          'Pickup confirmed. Safe travels!',
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
+      }
     },
     onError: (err: Error) => {
       Alert.alert('Verification Failed', err.message ?? 'Invalid or expired code. Please try again.');
@@ -84,11 +88,13 @@ export function OTPEntry({ route, navigation }: OTPEntryProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trip', tripId] });
       queryClient.invalidateQueries({ queryKey: ['my-trips'] });
-      Alert.alert(
-        '📷 Photo Submitted',
-        'Fallback photo recorded. Trip verification logged.',
-        [{ text: 'OK', onPress: () => navigation.goBack() }]
-      );
+      if (eventType === 'dropoff') {
+        navigation.replace('SignatureCapture', { tripId });
+      } else {
+        Alert.alert('📷 Photo Submitted', 'Fallback photo recorded.', [
+          { text: 'OK', onPress: () => navigation.goBack() },
+        ]);
+      }
     },
     onError: (err: Error) => Alert.alert('Upload Failed', err.message),
   });

@@ -185,6 +185,27 @@ CREATE INDEX idx_trips_status ON trips(status);
 CREATE INDEX idx_trips_pickup_time ON trips(scheduled_pickup_at);
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- TRIP EVENTS (append-only audit: signature, proof photo, no-show, cancellation)
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TYPE trip_event_type AS ENUM ('signature', 'proof_photo', 'no_show', 'cancellation');
+
+CREATE TABLE IF NOT EXISTS trip_events (
+  id            SERIAL PRIMARY KEY,
+  org_id        INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  trip_id       INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+  driver_id     INTEGER REFERENCES drivers(id) ON DELETE SET NULL,  -- preserve audit row if driver is removed
+  event_type    trip_event_type NOT NULL,
+  reason_code   VARCHAR(40),
+  note          TEXT,
+  file_filename VARCHAR(255),
+  lat           DECIMAL(10, 8),
+  lng           DECIMAL(11, 8),
+  created_at    TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX idx_trip_events_trip ON trip_events(trip_id);
+CREATE INDEX idx_trip_events_org ON trip_events(org_id, created_at DESC);
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- DRIVER LOCATIONS (real-time GPS tracking)
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS driver_locations (
@@ -311,7 +332,8 @@ ALTER TABLE trips
   ADD COLUMN IF NOT EXISTS assistance_needs TEXT,
   ADD COLUMN IF NOT EXISTS trip_type VARCHAR(50),
   ADD COLUMN IF NOT EXISTS source_vendor_profile_id INTEGER,
-  ADD COLUMN IF NOT EXISTS import_job_id INTEGER;
+  ADD COLUMN IF NOT EXISTS import_job_id INTEGER,
+  ADD COLUMN IF NOT EXISTS requested_vehicle_type VARCHAR(100);
 
 CREATE TABLE IF NOT EXISTS vendor_profiles (
   id SERIAL PRIMARY KEY,
