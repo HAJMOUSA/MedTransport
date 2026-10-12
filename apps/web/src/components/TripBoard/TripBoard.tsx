@@ -17,6 +17,8 @@ const STATUS_COLUMNS = [
   { key: 'en_route_dropoff',  label: 'To Dropoff',   color: 'bg-purple-100 text-purple-700' },
   { key: 'arrived_dropoff',   label: 'At Dropoff',   color: 'bg-teal-100   text-teal-700' },
   { key: 'completed',         label: 'Completed',    color: 'bg-green-100  text-green-700' },
+  { key: 'no_show',           label: 'No-Show',      color: 'bg-amber-100  text-amber-800' },
+  { key: 'cancelled',         label: 'Cancelled',    color: 'bg-rose-100   text-rose-700' },
 ] as const;
 
 export interface Trip {
