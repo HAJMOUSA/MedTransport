@@ -9,24 +9,59 @@ const router = Router();
 router.use(authenticate);
 
 // ─── GET /api/tracking/drivers/live ──────────────────────────────────────────
-// Returns all active driver positions for the org (from Redis)
+// Returns every on-shift driver for the org with their last known position.
+// Source of truth for "who is on shift" is the DB (drivers.on_shift), NOT a
+// Redis set — so drivers stay visible across reconnects and API/Redis restarts.
+// Position comes from Redis (hot) and falls back to the latest persisted GPS row.
 router.get('/drivers/live', requireRole('admin', 'dispatcher'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const activeDriverIds = await redis.smembers(RedisKeys.activeDrivers(req.user!.orgId));
+      const drivers = await query<{ driver_id: number; driver_name: string }>(
+        `SELECT d.id AS driver_id, u.name AS driver_name
+         FROM drivers d
+         JOIN users u ON u.id = d.user_id
+         WHERE d.org_id = $1 AND d.on_shift = true`,
+        [req.user!.orgId]
+      );
 
       const positions = await Promise.all(
-        activeDriverIds.map(async (driverId) => {
-          const loc = await redis.hgetall(RedisKeys.driverLocation(parseInt(driverId, 10)));
-          if (!loc.lat) return null;
+        drivers.map(async ({ driver_id, driver_name }) => {
+          // 1. Hot path: last position cached in Redis
+          const loc = await redis.hgetall(RedisKeys.driverLocation(driver_id));
+          if (loc.lat) {
+            return {
+              driverId: driver_id,
+              driverName: driver_name,
+              lat: parseFloat(loc.lat),
+              lng: parseFloat(loc.lng),
+              speedMph: parseFloat(loc.speed ?? '0'),
+              headingDeg: parseInt(loc.heading ?? '0', 10),
+              accuracyM: parseInt(loc.accuracy ?? '50', 10),
+              timestamp: new Date(parseInt(loc.updatedAt ?? '0', 10)).toISOString(),
+            };
+          }
+
+          // 2. Fallback: most recent persisted GPS fix (e.g. after a Redis restart)
+          const last = await query<{
+            lat: string; lng: string; speed_mph: string | null;
+            heading_deg: number | null; accuracy_m: number | null; recorded_at: Date;
+          }>(
+            `SELECT latitude AS lat, longitude AS lng, speed_mph, heading_deg, accuracy_m, recorded_at
+             FROM driver_locations WHERE driver_id = $1
+             ORDER BY recorded_at DESC LIMIT 1`,
+            [driver_id]
+          );
+          const row = last[0];
+          if (!row) return null; // on shift but never reported a position yet
           return {
-            driverId: parseInt(driverId, 10),
-            lat: parseFloat(loc.lat),
-            lng: parseFloat(loc.lng),
-            speedMph: parseFloat(loc.speed ?? '0'),
-            headingDeg: parseInt(loc.heading ?? '0', 10),
-            accuracyM: parseInt(loc.accuracy ?? '50', 10),
-            updatedAt: new Date(parseInt(loc.updatedAt ?? '0', 10)).toISOString(),
+            driverId: driver_id,
+            driverName: driver_name,
+            lat: parseFloat(row.lat),
+            lng: parseFloat(row.lng),
+            speedMph: row.speed_mph ? parseFloat(row.speed_mph) : 0,
+            headingDeg: row.heading_deg ?? 0,
+            accuracyM: row.accuracy_m ?? 50,
+            timestamp: new Date(row.recorded_at).toISOString(),
           };
         })
       );
@@ -43,7 +78,7 @@ router.get('/trips/:tripId/route',
   param('tripId').isInt(),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const locations = await query(
+      const locations = await query<{ lat: string; lng: string; speed_mph: string | null; heading_deg: number | null; recorded_at: Date }>(
         `SELECT dl.latitude as lat, dl.longitude as lng, dl.speed_mph, dl.heading_deg,
                 dl.recorded_at
          FROM driver_locations dl
@@ -52,7 +87,46 @@ router.get('/trips/:tripId/route',
          ORDER BY dl.recorded_at ASC`,
         [req.params.tripId, req.user!.orgId]
       );
-      res.json(locations);
+      res.json(locations.map(r => ({
+        lat: parseFloat(r.lat),
+        lng: parseFloat(r.lng),
+        speedMph: r.speed_mph ? parseFloat(r.speed_mph) : 0,
+        headingDeg: r.heading_deg ?? 0,
+        recordedAt: new Date(r.recorded_at).toISOString(),
+      })));
+    } catch (err) { next(err); }
+  }
+);
+
+// ─── GET /api/tracking/drivers/:driverId/path ─────────────────────────────────
+// Recent GPS breadcrumb points for one driver, ordered oldest→newest. Seeds the
+// live-map route polyline so an already-moving driver shows the trail so far;
+// live growth comes from driver:position socket events on top of this.
+router.get('/drivers/:driverId/path',
+  requireRole('admin', 'dispatcher'),
+  param('driverId').isInt(),
+  qv('minutes').optional().isInt({ min: 1, max: 1440 }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!validationResult(req).isEmpty()) return next(new AppError('Invalid parameters', 400));
+    try {
+      const minutes = Math.min(parseInt((req.query.minutes as string) || '240', 10), 1440);
+      const rows = await query<{ lat: string; lng: string; speed_mph: string | null; heading_deg: number | null; recorded_at: Date }>(
+        `SELECT dl.latitude AS lat, dl.longitude AS lng, dl.speed_mph, dl.heading_deg, dl.recorded_at
+         FROM driver_locations dl
+         JOIN drivers d ON d.id = dl.driver_id
+         WHERE dl.driver_id = $1 AND d.org_id = $2
+           AND dl.recorded_at >= NOW() - ($3 * INTERVAL '1 minute')
+         ORDER BY dl.recorded_at ASC
+         LIMIT 2000`,
+        [req.params.driverId, req.user!.orgId, minutes]
+      );
+      res.json(rows.map(r => ({
+        lat: parseFloat(r.lat),
+        lng: parseFloat(r.lng),
+        speedMph: r.speed_mph ? parseFloat(r.speed_mph) : 0,
+        headingDeg: r.heading_deg ?? 0,
+        recordedAt: new Date(r.recorded_at).toISOString(),
+      })));
     } catch (err) { next(err); }
   }
 );

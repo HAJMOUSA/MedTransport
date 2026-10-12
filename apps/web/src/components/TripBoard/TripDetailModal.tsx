@@ -1,8 +1,14 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import { X, AlertCircle, User, Car } from 'lucide-react';
+import { X, AlertCircle, User, Car, Map as MapIcon } from 'lucide-react';
 import type { Trip } from './TripBoard';
+import { TripRouteMap } from './TripRouteMap';
+
+const toLatLng = (lat: unknown, lng: unknown): [number, number] | null => {
+  const a = Number(lat), b = Number(lng);
+  return Number.isFinite(a) && Number.isFinite(b) && (a !== 0 || b !== 0) ? [a, b] : null;
+};
 
 interface TripDetailModalProps {
   trip: Trip;
@@ -64,6 +70,10 @@ export function TripDetailModal({ trip, onClose }: TripDetailModalProps) {
 
   const error = updateTrip.error || assignDriver.error;
   const isPending = updateTrip.isPending || assignDriver.isPending;
+
+  const [showRoute, setShowRoute] = useState(false);
+  const pickup = toLatLng(trip.pickup_lat, trip.pickup_lng);
+  const dropoff = toLatLng(trip.dropoff_lat, trip.dropoff_lng);
 
   return (
     <div
@@ -133,6 +143,28 @@ export function TripDetailModal({ trip, onClose }: TripDetailModalProps) {
                 >
                   {assignDriver.isPending ? 'Assigning…' : 'Assign'}
                 </button>
+              </div>
+            )}
+          </div>
+
+          {/* Recorded route */}
+          <div className="bg-gray-50 rounded-xl p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
+                <MapIcon className="w-4 h-4" />
+                Recorded Route
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowRoute(v => !v)}
+                className="text-sm text-blue-600 font-medium hover:underline"
+              >
+                {showRoute ? 'Hide' : 'View route'}
+              </button>
+            </div>
+            {showRoute && (
+              <div className="mt-3">
+                <TripRouteMap tripId={trip.id} pickup={pickup} dropoff={dropoff} />
               </div>
             )}
           </div>

@@ -247,11 +247,12 @@ export async function executeImport(opts: ExecuteOptions): Promise<number> {
             `UPDATE trips SET rider_id=$1, pickup_address=$2, dropoff_address=$3,
                scheduled_pickup_at=$4, appointment_at=$5, level_of_service=$6,
                additional_passengers=$7, assistance_needs=$8, trip_type=$9,
-               distance_miles=$10, dispatcher_notes=$11, will_call=$15, updated_at=NOW()
+               distance_miles=$10, dispatcher_notes=$11, will_call=$15,
+               requested_vehicle_type=$16, updated_at=NOW()
              WHERE org_id=$12 AND source_vendor_profile_id=$13 AND external_trip_id=$14`,
             [rider.id, pickupStr, dropoffStr, t.pickupAt, t.appointmentAt, t.levelOfService,
              t.additionalPassengers, t.assistanceNeeds, t.tripType, t.distanceMiles, t.notes,
-             opts.orgId, opts.profileId, t.externalTripId, t.willCall]
+             opts.orgId, opts.profileId, t.externalTripId, t.willCall, t.requestedVehicleType]
           );
           await client.query('RELEASE SAVEPOINT row_write');
           // Safety net: the vendor-scoped analysis query guarantees the dup belongs to this
@@ -266,13 +267,14 @@ export async function executeImport(opts: ExecuteOptions): Promise<number> {
              scheduled_pickup_at, appointment_at, status, mobility_type,
              external_trip_id, level_of_service, additional_passengers, assistance_needs,
              trip_type, distance_miles, dispatcher_notes, source_vendor_profile_id,
-             import_job_id, created_by, will_call)
-           VALUES ($1,$2,$3,$4,$5,$6,$7::trip_status,'standard',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+             import_job_id, created_by, will_call, requested_vehicle_type)
+           VALUES ($1,$2,$3,$4,$5,$6,$7::trip_status,'standard',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
            RETURNING id`,
           [opts.orgId, rider.id, pickupStr, dropoffStr,
            t.pickupAt ?? t.appointmentAt, t.appointmentAt, t.status ?? 'scheduled',
            t.externalTripId, t.levelOfService, t.additionalPassengers, t.assistanceNeeds,
-           t.tripType, t.distanceMiles, t.notes, opts.profileId, jobId, opts.userId, t.willCall]
+           t.tripType, t.distanceMiles, t.notes, opts.profileId, jobId, opts.userId, t.willCall,
+           t.requestedVehicleType]
         );
         await client.query('RELEASE SAVEPOINT row_write');
         tripIds.push(inserted.rows[0].id);

@@ -28,6 +28,19 @@ export function ImportProfiles() {
     onError: e => setError((e as Error).message),
   });
 
+  const renameProfile = useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) =>
+      api.patch(`/api/import/profiles/${id}`, { name }).then(r => r.data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['import-profiles'] }),
+    onError: e => setError((e as Error).message),
+  });
+
+  const deleteProfile = useMutation({
+    mutationFn: (id: number) => api.delete(`/api/import/profiles/${id}`),
+    onSuccess: () => { setExpandedId(null); queryClient.invalidateQueries({ queryKey: ['import-profiles'] }); },
+    onError: e => setError((e as Error).message),
+  });
+
   const handleFile = (file: File) => {
     Papa.parse<string[]>(file, {
       preview: 1,
@@ -71,11 +84,23 @@ export function ImportProfiles() {
         {profiles.length === 0 && <p className="p-6 text-sm text-gray-500">No profiles yet. Upload a vendor CSV in the import wizard or create one here.</p>}
         {profiles.map(p => (
           <div key={p.id}>
-            <button onClick={() => setExpandedId(expandedId === p.id ? null : p.id)}
-              className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-gray-50">
-              <span className="font-medium text-gray-900">{p.name}</span>
-              <span className="text-xs text-gray-400">v{p.latestVersion} · {new Date(p.created_at).toLocaleDateString()}</span>
-            </button>
+            <div className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50">
+              <button onClick={() => setExpandedId(expandedId === p.id ? null : p.id)}
+                className="flex-1 flex items-center gap-3 text-left">
+                <span className="font-medium text-gray-900">{p.name}</span>
+                <span className="text-xs text-gray-400">v{p.latestVersion} · {new Date(p.created_at).toLocaleDateString()}</span>
+              </button>
+              {isAdmin && (
+                <div className="flex items-center gap-3 ml-3">
+                  <button
+                    onClick={() => { const n = window.prompt('Rename profile:', p.name); if (n && n.trim() && n !== p.name) renameProfile.mutate({ id: p.id, name: n.trim() }); }}
+                    className="text-xs text-blue-600 hover:underline">Rename</button>
+                  <button
+                    onClick={() => { if (window.confirm(`Delete profile "${p.name}"? Imported trips keep their data; the profile is removed from the list.`)) deleteProfile.mutate(p.id); }}
+                    className="text-xs text-red-600 hover:underline">Delete</button>
+                </div>
+              )}
+            </div>
             {expandedId === p.id && detail && (
               <div className="px-5 pb-4 space-y-3">
                 <div>

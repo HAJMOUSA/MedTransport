@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Circle, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useSocket } from '../../hooks/useSocket';
+import { api } from '../../lib/api';
 import { DriverPanel } from './DriverPanel';
+
+type LatLng = [number, number];
+const MAX_PATH_POINTS = 800; // cap per-driver trail length for performance
 
 // Fix Leaflet default icon paths for bundlers
 delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl;
@@ -77,6 +81,49 @@ export function LiveMap({ initialDrivers = [], trips = [] }: LiveMapProps) {
   );
   const [selectedDriver, setSelectedDriver] = useState<DriverPosition | null>(null);
   const driverNamesRef = useRef<Map<number, string>>(new Map());
+  // Per-driver traveled GPS route (raw points), drawn as a growing polyline.
+  const [paths, setPaths] = useState<Map<number, LatLng[]>>(new Map());
+  const seededRef = useRef<Set<number>>(new Set());
+
+  // Merge in drivers fetched from the REST snapshot (on-shift drivers that may
+  // not have emitted a live position since the map opened). Refetched on an
+  // interval by the parent, so this runs whenever the snapshot changes.
+  useEffect(() => {
+    if (!initialDrivers.length) return;
+    setDrivers(prev => {
+      const updated = new Map(prev);
+      for (const d of initialDrivers) {
+        if (d.driverName) driverNamesRef.current.set(d.driverId, d.driverName);
+        const existing = updated.get(d.driverId);
+        // Don't clobber a fresher live-socket position with an older snapshot.
+        if (!existing || new Date(d.timestamp) >= new Date(existing.timestamp)) {
+          updated.set(d.driverId, d);
+        }
+      }
+      return updated;
+    });
+  }, [initialDrivers]);
+
+  // Seed each driver's recent route trail once (REST), then grow it from live
+  // socket events. Runs whenever a new driver appears on the map.
+  useEffect(() => {
+    for (const driverId of drivers.keys()) {
+      if (seededRef.current.has(driverId)) continue;
+      seededRef.current.add(driverId);
+      api.get(`/api/tracking/drivers/${driverId}/path`)
+        .then(r => {
+          const pts: LatLng[] = (r.data as Array<{ lat: number; lng: number }>).map(p => [p.lat, p.lng]);
+          if (!pts.length) return;
+          setPaths(prev => {
+            if (prev.has(driverId)) return prev; // live points already started the trail
+            const next = new Map(prev);
+            next.set(driverId, pts.slice(-MAX_PATH_POINTS));
+            return next;
+          });
+        })
+        .catch(() => { seededRef.current.delete(driverId); }); // allow a later retry
+    }
+  }, [drivers]);
 
   // Listen for real-time driver position updates via Socket.io
   useEffect(() => {
@@ -91,6 +138,15 @@ export function LiveMap({ initialDrivers = [], trips = [] }: LiveMapProps) {
         });
         return updated;
       });
+      // Append to the driver's traveled route (skip duplicate consecutive points).
+      setPaths(prev => {
+        const arr = prev.get(data.driverId) ?? [];
+        const last = arr[arr.length - 1];
+        if (last && last[0] === data.lat && last[1] === data.lng) return prev;
+        const next = new Map(prev);
+        next.set(data.driverId, [...arr, [data.lat, data.lng] as LatLng].slice(-MAX_PATH_POINTS));
+        return next;
+      });
     };
 
     const handleDisconnected = (data: { driverId: number }) => {
@@ -99,6 +155,13 @@ export function LiveMap({ initialDrivers = [], trips = [] }: LiveMapProps) {
         updated.delete(data.driverId);
         return updated;
       });
+      setPaths(prev => {
+        if (!prev.has(data.driverId)) return prev;
+        const next = new Map(prev);
+        next.delete(data.driverId);
+        return next;
+      });
+      seededRef.current.delete(data.driverId);
     };
 
     socket.on('driver:position', handlePosition);
@@ -126,6 +189,21 @@ export function LiveMap({ initialDrivers = [], trips = [] }: LiveMapProps) {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         />
+
+        {/* Driver traveled routes (raw GPS trail) */}
+        {Array.from(paths.entries()).map(([driverId, pts]) => (
+          pts.length >= 2 && (
+            <Polyline
+              key={`path-${driverId}`}
+              positions={pts}
+              pathOptions={{
+                color: selectedDriver?.driverId === driverId ? '#1d4ed8' : '#60a5fa',
+                weight: selectedDriver?.driverId === driverId ? 5 : 3,
+                opacity: 0.85,
+              }}
+            />
+          )
+        ))}
 
         {/* Driver markers */}
         {Array.from(drivers.values()).map((driver) => {

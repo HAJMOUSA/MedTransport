@@ -1,0 +1,6 @@
+interface:
+  display_name: "Daytonn SSH"
+  short_description: "SSH access for the Daytonn server"
+  default_prompt: "Use $daytonn-ssh to connect to the Daytonn Ubuntu server and check its Tailscale VPN status."
+policy:
+  allow_implicit_invocation: true

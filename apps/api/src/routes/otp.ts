@@ -55,14 +55,23 @@ router.post('/:tripId/verify',
         return res.status(400).json({ success: false, error: result.error });
       }
 
-      // Update trip status after successful OTP
-      const newStatus = eventType === 'pickup' ? 'picked_up' : 'completed';
-      const timestampField = eventType === 'pickup' ? 'actual_pickup_at' : 'actual_dropoff_at';
-
-      await query(
-        `UPDATE trips SET status = $1, ${timestampField} = NOW(), updated_at = NOW() WHERE id = $2`,
-        [newStatus, tripId]
-      );
+      // Pickup advances to picked_up. Dropoff does NOT complete here — the trip
+      // is completed only after signature capture (PATCH /status enforces the gate).
+      let newStatus: string;
+      if (eventType === 'pickup') {
+        newStatus = 'picked_up';
+        await query(
+          `UPDATE trips SET status = $1, actual_pickup_at = NOW(), updated_at = NOW() WHERE id = $2 AND org_id = $3`,
+          [newStatus, tripId, req.user!.orgId]
+        );
+      } else {
+        newStatus = 'arrived_dropoff';
+        // Status stays arrived_dropoff; only record that dropoff OTP was verified.
+        await query(
+          `UPDATE trips SET updated_at = NOW() WHERE id = $1 AND org_id = $2`,
+          [tripId, req.user!.orgId]
+        );
+      }
 
       // Notify dispatchers
       getIo().to(`org:${req.user!.orgId}:dispatchers`).emit('trip:otp-verified', {
@@ -105,13 +114,22 @@ router.post('/:tripId/fallback',
         lng ? parseFloat(lng) : null,
       );
 
-      // Update trip status
-      const newStatus = eventType === 'pickup' ? 'picked_up' : 'completed';
-      await query(
-        `UPDATE trips SET status = $1, ${eventType === 'pickup' ? 'actual_pickup_at' : 'actual_dropoff_at'} = NOW(),
-         updated_at = NOW() WHERE id = $2 AND org_id = $3`,
-        [newStatus, tripId, req.user!.orgId]
-      );
+      // Pickup advances; dropoff stays arrived_dropoff (completion happens after signature).
+      let newStatus: string;
+      if (eventType === 'pickup') {
+        newStatus = 'picked_up';
+        await query(
+          `UPDATE trips SET status = $1, actual_pickup_at = NOW(), updated_at = NOW()
+           WHERE id = $2 AND org_id = $3`,
+          [newStatus, tripId, req.user!.orgId]
+        );
+      } else {
+        newStatus = 'arrived_dropoff';
+        await query(
+          `UPDATE trips SET updated_at = NOW() WHERE id = $1 AND org_id = $2`,
+          [tripId, req.user!.orgId]
+        );
+      }
 
       getIo().to(`org:${req.user!.orgId}:dispatchers`).emit('trip:otp-verified', {
         tripId,

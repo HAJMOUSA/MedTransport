@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { useAuthStore } from '../../hooks/useAuth';
@@ -64,6 +64,48 @@ export function MapStep({ state, update }: { state: WizardState; update: (p: Par
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileDetail, state.profileId, state.profileVersionId]);
+
+  // Seed value-translations + formats from the selected profile's config (once per
+  // profile), or reset to defaults when no profile is selected. User edits then
+  // live directly in wizard state.
+  const appliedProfileRef = useRef<number | null | undefined>(undefined);
+  useEffect(() => {
+    if (state.profileId === null) {
+      if (appliedProfileRef.current !== null) {
+        appliedProfileRef.current = null;
+        update({ valueTranslations: {}, dateFormat: 'M/d/yyyy', timeFormat: 'h:mm a', timezone: 'America/New_York' });
+      }
+      return;
+    }
+    const c = profileDetail?.latestConfig as (Record<string, unknown> & {
+      valueTranslations?: Record<string, Record<string, string>>;
+      dateFormat?: string; timeFormat?: string; timezone?: string;
+    }) | null | undefined;
+    if (c && appliedProfileRef.current !== state.profileId) {
+      appliedProfileRef.current = state.profileId;
+      update({
+        valueTranslations: c.valueTranslations ?? {},
+        dateFormat: c.dateFormat ?? 'M/d/yyyy',
+        timeFormat: c.timeFormat ?? 'h:mm a',
+        timezone: c.timezone ?? 'America/New_York',
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.profileId, profileDetail]);
+
+  // Columns whose canonical target is a controlled/boolean field → value translations apply.
+  const fieldType = useMemo(() => Object.fromEntries(fields.map(f => [f.key, f.type])), [fields]);
+  const fieldLabel = useMemo(() => Object.fromEntries(fields.map(f => [f.key, f.label])), [fields]);
+  const sampleValues = state.upload?.sampleValues ?? {};
+  const translatableColumns = Object.entries(effective)
+    .map(([header, target]) => ({ header, key: target.split('.')[0] }))
+    .filter(({ key }) => fieldType[key] === 'controlled' || fieldType[key] === 'boolean');
+
+  const setTranslation = (key: string, source: string, target: string) => {
+    const next = { ...state.valueTranslations, [key]: { ...(state.valueTranslations[key] ?? {}) } };
+    if (target === '') delete next[key][source]; else next[key][source] = target;
+    update({ valueTranslations: next });
+  };
 
   const requiredKeys = fields.filter(f => f.required).map(f => f.key);
   const mappedTargets = new Set(Object.values(effective).map(t => t.split('.')[0]));
@@ -170,6 +212,71 @@ export function MapStep({ state, update }: { state: WizardState; update: (p: Par
         </table>
       </div>
 
+      {/* Date & time formats */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4">
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">Date &amp; time formats</h3>
+        <div className="flex flex-wrap gap-4">
+          <label className="text-xs text-gray-600">Date format
+            <input value={state.dateFormat} onChange={e => update({ dateFormat: e.target.value })}
+              className="mt-1 block border border-gray-300 rounded-lg px-2 py-1.5 text-sm" placeholder="M/d/yyyy" />
+          </label>
+          <label className="text-xs text-gray-600">Time format
+            <input value={state.timeFormat} onChange={e => update({ timeFormat: e.target.value })}
+              className="mt-1 block border border-gray-300 rounded-lg px-2 py-1.5 text-sm" placeholder="h:mm a" />
+          </label>
+          <label className="text-xs text-gray-600">Timezone
+            <input value={state.timezone} onChange={e => update({ timezone: e.target.value })}
+              className="mt-1 block border border-gray-300 rounded-lg px-2 py-1.5 text-sm" placeholder="America/New_York" />
+          </label>
+        </div>
+        <p className="text-xs text-gray-400 mt-2">Luxon tokens — e.g. <code>M/d/yyyy</code> · <code>h:mm a</code> (12-hour) or <code>H:mm</code> (24-hour) · IANA timezone.</p>
+      </div>
+
+      {/* Value translations */}
+      {translatableColumns.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-4">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700">Value translations</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Map this file's values to your system's values. Required for controlled fields (Level of Service, Status, Trip Type) and the Will-Call flag — leave blank to keep the original value.
+            </p>
+          </div>
+          {translatableColumns.map(({ header, key }) => {
+            const vals = sampleValues[header] ?? [];
+            const placeholder =
+              key === 'level_of_service' ? 'AMB / WCH / STR'
+              : key === 'status' ? 'scheduled / cancelled / completed / no_show'
+              : key === 'will_call' ? 'true / false'
+              : 'target value';
+            return (
+              <div key={`${header}:${key}`} className="border-t border-gray-100 pt-3">
+                <div className="text-sm font-medium text-gray-800 mb-2">
+                  {header} <span className="text-gray-400">→ {fieldLabel[key] ?? key}</span>
+                </div>
+                {vals.length === 0 ? (
+                  <p className="text-xs text-gray-400">No sample values found in this column.</p>
+                ) : (
+                  <div className="grid sm:grid-cols-2 gap-2">
+                    {vals.map(v => (
+                      <div key={v} className="flex items-center gap-2">
+                        <span className="text-xs text-gray-600 truncate flex-1" title={v}>{v}</span>
+                        <span className="text-gray-300 text-xs">→</span>
+                        <input
+                          value={state.valueTranslations[key]?.[v] ?? ''}
+                          onChange={e => setTranslation(key, v, e.target.value)}
+                          placeholder={placeholder}
+                          className="border border-gray-300 rounded-lg px-2 py-1 text-sm w-40"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* Missing-required warning */}
       {missingRequired.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
@@ -185,7 +292,14 @@ export function MapStep({ state, update }: { state: WizardState; update: (p: Par
           {isAdmin && state.profileId !== null && profileDetail?.latestConfig && (
             <SaveVersionButton
               profileId={state.profileId}
-              config={{ ...profileDetail.latestConfig, columnMap: cleanedMap(effective) }}
+              config={{
+                ...profileDetail.latestConfig,
+                columnMap: cleanedMap(effective),
+                valueTranslations: state.valueTranslations,
+                dateFormat: state.dateFormat,
+                timeFormat: state.timeFormat,
+                timezone: state.timezone,
+              }}
               onSaved={versionId => update({ profileVersionId: versionId, mappingOverrides: {} })}
               onError={setError}
             />
@@ -194,6 +308,10 @@ export function MapStep({ state, update }: { state: WizardState; update: (p: Par
             <SaveAsNewProfileButton
               headers={state.upload.headers}
               columnMap={cleanedMap(effective)}
+              valueTranslations={state.valueTranslations}
+              dateFormat={state.dateFormat}
+              timeFormat={state.timeFormat}
+              timezone={state.timezone}
               onSaved={(profileId, versionId) => {
                 setDraftProfileId(profileId);
                 update({ profileId, profileVersionId: versionId, mappingOverrides: {} });
@@ -212,11 +330,11 @@ export function MapStep({ state, update }: { state: WizardState; update: (p: Par
                     columnMap: cleanedMap(effective),
                     encoding: 'auto',
                     delimiter: ',',
-                    dateFormat: 'M/d/yyyy',
-                    timeFormat: 'H:mm',
+                    dateFormat: state.dateFormat,
+                    timeFormat: state.timeFormat,
                     dateTimeFormat: 'iso',
-                    timezone: 'America/New_York',
-                    valueTranslations: {},
+                    timezone: state.timezone,
+                    valueTranslations: state.valueTranslations,
                     defaults: {},
                     requiredOverrides: [],
                   }
@@ -264,9 +382,13 @@ function SaveVersionButton({ profileId, config, onSaved, onError }: {
   );
 }
 
-function SaveAsNewProfileButton({ headers, columnMap, onSaved, onError }: {
+function SaveAsNewProfileButton({ headers, columnMap, valueTranslations, dateFormat, timeFormat, timezone, onSaved, onError }: {
   headers: string[];
   columnMap: Record<string, string>;
+  valueTranslations: Record<string, Record<string, string>>;
+  dateFormat: string;
+  timeFormat: string;
+  timezone: string;
   onSaved: (profileId: number, versionId: number) => void;
   onError: (msg: string) => void;
 }) {
@@ -285,11 +407,11 @@ function SaveAsNewProfileButton({ headers, columnMap, onSaved, onError }: {
             columnMap,
             encoding: 'auto',
             delimiter: ',',
-            dateFormat: 'M/d/yyyy',
-            timeFormat: 'H:mm',
+            dateFormat,
+            timeFormat,
             dateTimeFormat: 'iso',
-            timezone: 'America/New_York',
-            valueTranslations: {},
+            timezone,
+            valueTranslations,
             defaults: {},
             requiredOverrides: [],
           };

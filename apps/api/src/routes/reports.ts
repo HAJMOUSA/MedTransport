@@ -35,9 +35,9 @@ router.get('/summary',
         query(
           `SELECT
              COUNT(*) as total_otp_events,
-             COUNT(CASE WHEN status = 'verified' THEN 1 END) as verified,
-             COUNT(CASE WHEN status = 'fallback_photo' THEN 1 END) as fallback_photos,
-             COUNT(CASE WHEN status = 'expired' THEN 1 END) as expired
+             COUNT(CASE WHEN oe.status = 'verified' THEN 1 END) as verified,
+             COUNT(CASE WHEN oe.status = 'fallback_photo' THEN 1 END) as fallback_photos,
+             COUNT(CASE WHEN oe.status = 'expired' THEN 1 END) as expired
            FROM otp_events oe
            JOIN trips t ON t.id = oe.trip_id
            WHERE t.org_id = $1

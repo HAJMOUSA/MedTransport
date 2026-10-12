@@ -68,4 +68,57 @@ describe('suggestMapping', () => {
   it('returns an empty map for no headers', () => {
     expect(suggestMapping([])).toEqual({});
   });
+
+  // ── Aggressive fuzzy matching (real broker exports) ───────────────────────
+  it('matches possessive and noisy headers via subset/typo', () => {
+    const m = suggestMapping([
+      "Member's First Name", "Member's Last Name", "Member's Phone Number",
+      "Member's Alt Phone", 'Medicaid Number', 'Trip Number', 'Trip Mileage',
+      'Will Call Flag', 'Number of Additional Passengers', 'Special Needs',
+      'Driver Notes', 'Trip Status', 'Date of Birth',
+    ]);
+    expect(m).toMatchObject({
+      "Member's First Name": 'passenger_first_name',
+      "Member's Last Name": 'passenger_last_name',
+      "Member's Phone Number": 'primary_phone',
+      "Member's Alt Phone": 'alternate_phone',
+      'Medicaid Number': 'medical_id',
+      'Trip Number': 'external_trip_id',
+      'Trip Mileage': 'distance_miles',
+      'Will Call Flag': 'will_call',
+      'Number of Additional Passengers': 'additional_passengers',
+      'Special Needs': 'assistance_needs',
+      'Driver Notes': 'notes',
+      'Trip Status': 'status',
+      'Date of Birth': 'date_of_birth',
+    });
+  });
+
+  it('treats "Delivery" as the drop-off location', () => {
+    const m = suggestMapping([
+      'Pickup Address', 'Pickup City', 'Pickup State', 'Pickup Zip Code',
+      'Delivery Address', 'Delivery City', 'Delivery State', 'Delivery Zip Code',
+    ]);
+    expect(m).toMatchObject({
+      'Pickup Address': 'pickup_address.street',
+      'Pickup City': 'pickup_address.city',
+      'Pickup State': 'pickup_address.state',
+      'Pickup Zip Code': 'pickup_address.zip',
+      'Delivery Address': 'dropoff_address.street',
+      'Delivery City': 'dropoff_address.city',
+      'Delivery State': 'dropoff_address.state',
+      'Delivery Zip Code': 'dropoff_address.zip',
+    });
+  });
+
+  it('does not let a located facility phone steal the passenger phone', () => {
+    const m = suggestMapping(['Delivery Phone Number', "Member's Phone Number"]);
+    expect(m["Member's Phone Number"]).toBe('primary_phone');
+    expect(m['Delivery Phone Number']).toBeUndefined();
+  });
+
+  it('maps Passenger Type to requested_vehicle_type', () => {
+    const m = suggestMapping(['Passenger Type']);
+    expect(m['Passenger Type']).toBe('requested_vehicle_type');
+  });
 });

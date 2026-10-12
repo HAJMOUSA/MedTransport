@@ -30,7 +30,13 @@ export const useAuthStore = create<AuthState>()(
       setTokens: (accessToken, refreshToken) =>
         set({ accessToken, refreshToken }),
       logout: () => set({ user: null, accessToken: null, refreshToken: null }),
-      isAuthenticated: () => !!get().accessToken && !!get().user,
+      // A session is valid as long as we have a user and a refresh token. The
+      // access token is intentionally NOT persisted (only kept in memory), so on
+      // a page reload it is null — the first API call 401s and the response
+      // interceptor silently mints a new access token from the refresh token.
+      // Checking accessToken here caused every reload / deep-link to bounce to
+      // the login screen before the refresh token was ever used.
+      isAuthenticated: () => !!get().refreshToken && !!get().user,
     }),
     {
       name: 'midtransport-auth',

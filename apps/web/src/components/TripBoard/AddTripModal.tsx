@@ -105,6 +105,7 @@ function buildCanonical(f: FormState): CanonicalTrip {
     additionalPassengers: f.additionalPassengers,
     assistanceNeeds: f.mode === 'new' && f.assistanceNeeds.trim() ? f.assistanceNeeds.trim() : null,
     tripType: f.tripType || null,
+    requestedVehicleType: null,
     status: null,
     distanceMiles: null,
     notes: f.notes.trim() || null,

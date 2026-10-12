@@ -1,0 +1,6 @@
+# Local-only overlay: publish the API port to the host so a USB-connected
+# phone can reach it via `adb reverse tcp:3001 tcp:3001`. Not for production.
+services:
+  api:
+    ports:
+      - "3001:3001"
